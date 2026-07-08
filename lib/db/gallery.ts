@@ -1,0 +1,435 @@
+export type Album = {
+  id: string;
+  title: string;
+  description: string;
+  is_public: boolean;
+  has_access_key: boolean;
+  cover_image_id: string | null;
+  created_at: string;
+  updated_at: string;
+  image_count: number;
+  total_size_bytes: number;
+  cover_image: ImageSummary | null;
+};
+
+export type ImageSummary = {
+  id: string;
+  album_id: string;
+  r2_key: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  width: number | null;
+  height: number | null;
+  title: string;
+  description: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GalleryImage = ImageSummary;
+
+type AlbumListRow = {
+  id: string;
+  title: string;
+  description: string;
+  is_public: number | string | null;
+  access_key: string | null;
+  cover_image_id: string | null;
+  created_at: string;
+  updated_at: string;
+  image_count: number | string | null;
+  total_size_bytes: number | string | null;
+  cover_id: string | null;
+  cover_album_id: string | null;
+  cover_r2_key: string | null;
+  cover_filename: string | null;
+  cover_content_type: string | null;
+  cover_size_bytes: number | string | null;
+  cover_width: number | string | null;
+  cover_height: number | string | null;
+  cover_title: string | null;
+  cover_description: string | null;
+  cover_sort_order: number | string | null;
+  cover_created_at: string | null;
+  cover_updated_at: string | null;
+};
+
+export async function listAlbums(db: D1Database): Promise<Album[]> {
+  const result = await db
+    .prepare(
+      `
+      SELECT
+        a.*,
+        COALESCE(stats.image_count, 0) AS image_count,
+        COALESCE(stats.total_size_bytes, 0) AS total_size_bytes,
+        cover.id AS cover_id,
+        cover.album_id AS cover_album_id,
+        cover.r2_key AS cover_r2_key,
+        cover.filename AS cover_filename,
+        cover.content_type AS cover_content_type,
+        cover.size_bytes AS cover_size_bytes,
+        cover.width AS cover_width,
+        cover.height AS cover_height,
+        cover.title AS cover_title,
+        cover.description AS cover_description,
+        cover.sort_order AS cover_sort_order,
+        cover.created_at AS cover_created_at,
+        cover.updated_at AS cover_updated_at
+      FROM albums a
+      LEFT JOIN (
+        SELECT album_id, COUNT(*) AS image_count, COALESCE(SUM(size_bytes), 0) AS total_size_bytes
+        FROM images
+        GROUP BY album_id
+      ) stats ON stats.album_id = a.id
+      LEFT JOIN images cover ON cover.id = a.cover_image_id
+      ORDER BY a.updated_at DESC, a.created_at DESC, a.id ASC
+      `
+    )
+    .all<AlbumListRow>();
+
+  return (result.results ?? []).map(toAlbum);
+}
+
+export async function createAlbum(
+  db: D1Database,
+  input: { id: string; title: string; description: string; isPublic: boolean; accessKey: string; now: string }
+): Promise<Album> {
+  await db
+    .prepare(
+      `
+      INSERT INTO albums (id, title, description, is_public, access_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      input.id,
+      input.title,
+      input.description,
+      input.isPublic ? 1 : 0,
+      input.isPublic ? "" : input.accessKey,
+      input.now,
+      input.now
+    )
+    .run();
+
+  const album = await getAlbum(db, input.id);
+  if (!album) {
+    throw new Error("Created album could not be read back");
+  }
+
+  return album;
+}
+
+export async function getAlbum(db: D1Database, albumId: string): Promise<Album | null> {
+  const row = await db
+    .prepare(
+      `
+      SELECT
+        a.*,
+        COALESCE(stats.image_count, 0) AS image_count,
+        COALESCE(stats.total_size_bytes, 0) AS total_size_bytes,
+        cover.id AS cover_id,
+        cover.album_id AS cover_album_id,
+        cover.r2_key AS cover_r2_key,
+        cover.filename AS cover_filename,
+        cover.content_type AS cover_content_type,
+        cover.size_bytes AS cover_size_bytes,
+        cover.width AS cover_width,
+        cover.height AS cover_height,
+        cover.title AS cover_title,
+        cover.description AS cover_description,
+        cover.sort_order AS cover_sort_order,
+        cover.created_at AS cover_created_at,
+        cover.updated_at AS cover_updated_at
+      FROM albums a
+      LEFT JOIN (
+        SELECT album_id, COUNT(*) AS image_count, COALESCE(SUM(size_bytes), 0) AS total_size_bytes
+        FROM images
+        GROUP BY album_id
+      ) stats ON stats.album_id = a.id
+      LEFT JOIN images cover ON cover.id = a.cover_image_id
+      WHERE a.id = ?
+      `
+    )
+    .bind(albumId)
+    .first<AlbumListRow>();
+
+  return row ? toAlbum(row) : null;
+}
+
+export async function updateAlbum(
+  db: D1Database,
+  albumId: string,
+  input: {
+    title?: string;
+    description?: string;
+    isPublic?: boolean;
+    accessKey?: string;
+    coverImageId?: string | null;
+    now: string;
+  }
+): Promise<Album | null> {
+  const current = await getAlbum(db, albumId);
+  if (!current) {
+    return null;
+  }
+
+  const nextIsPublic = input.isPublic ?? current.is_public;
+  const nextAccessKey = nextIsPublic ? "" : input.accessKey ?? (await getAlbumAccessKey(db, albumId));
+
+  await db
+    .prepare(
+      `
+      UPDATE albums
+      SET title = ?, description = ?, is_public = ?, access_key = ?, cover_image_id = ?, updated_at = ?
+      WHERE id = ?
+      `
+    )
+    .bind(
+      input.title ?? current.title,
+      input.description ?? current.description,
+      nextIsPublic ? 1 : 0,
+      nextAccessKey,
+      input.coverImageId === undefined ? current.cover_image_id : input.coverImageId,
+      input.now,
+      albumId
+    )
+    .run();
+
+  return getAlbum(db, albumId);
+}
+
+export async function deleteAlbum(db: D1Database, albumId: string): Promise<void> {
+  await db.prepare("DELETE FROM albums WHERE id = ?").bind(albumId).run();
+}
+
+export async function listImages(db: D1Database, albumId: string): Promise<GalleryImage[]> {
+  const result = await db
+    .prepare(
+      `
+      SELECT *
+      FROM images
+      WHERE album_id = ?
+      ORDER BY sort_order ASC, created_at DESC, id ASC
+      `
+    )
+    .bind(albumId)
+    .all<GalleryImage>();
+
+  return (result.results ?? []).map(toImage);
+}
+
+export async function listAlbumImagesForDelete(
+  db: D1Database,
+  albumId: string
+): Promise<Array<Pick<GalleryImage, "id" | "r2_key">>> {
+  const result = await db
+    .prepare("SELECT id, r2_key FROM images WHERE album_id = ?")
+    .bind(albumId)
+    .all<Pick<GalleryImage, "id" | "r2_key">>();
+
+  return result.results ?? [];
+}
+
+export async function getImage(db: D1Database, imageId: string): Promise<GalleryImage | null> {
+  const row = await db.prepare("SELECT * FROM images WHERE id = ?").bind(imageId).first<GalleryImage>();
+  return row ? toImage(row) : null;
+}
+
+export async function getAlbumAccessKey(db: D1Database, albumId: string): Promise<string> {
+  const row = await db
+    .prepare("SELECT access_key FROM albums WHERE id = ?")
+    .bind(albumId)
+    .first<{ access_key: string | null }>();
+
+  return row?.access_key ?? "";
+}
+
+export async function createImage(
+  db: D1Database,
+  input: {
+    id: string;
+    albumId: string;
+    r2Key: string;
+    filename: string;
+    contentType: string;
+    sizeBytes: number;
+    width: number | null;
+    height: number | null;
+    title: string;
+    description: string;
+    now: string;
+  }
+): Promise<GalleryImage> {
+  const maxSortRow = await db
+    .prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM images WHERE album_id = ?")
+    .bind(input.albumId)
+    .first<{ next_sort_order: number | string }>();
+
+  const sortOrder = toNumber(maxSortRow?.next_sort_order);
+
+  await db
+    .prepare(
+      `
+      INSERT INTO images (
+        id, album_id, r2_key, filename, content_type, size_bytes,
+        width, height, title, description, sort_order, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      input.id,
+      input.albumId,
+      input.r2Key,
+      input.filename,
+      input.contentType,
+      input.sizeBytes,
+      input.width,
+      input.height,
+      input.title,
+      input.description,
+      sortOrder,
+      input.now,
+      input.now
+    )
+    .run();
+
+  const album = await getAlbum(db, input.albumId);
+  if (album && !album.cover_image_id) {
+    await db
+      .prepare("UPDATE albums SET cover_image_id = ?, updated_at = ? WHERE id = ?")
+      .bind(input.id, input.now, input.albumId)
+      .run();
+  } else {
+    await db.prepare("UPDATE albums SET updated_at = ? WHERE id = ?").bind(input.now, input.albumId).run();
+  }
+
+  const image = await getImage(db, input.id);
+  if (!image) {
+    throw new Error("Created image could not be read back");
+  }
+
+  return image;
+}
+
+export async function updateImage(
+  db: D1Database,
+  imageId: string,
+  input: { title?: string; description?: string; sortOrder?: number; now: string }
+): Promise<GalleryImage | null> {
+  const current = await getImage(db, imageId);
+  if (!current) {
+    return null;
+  }
+
+  await db
+    .prepare(
+      `
+      UPDATE images
+      SET title = ?, description = ?, sort_order = ?, updated_at = ?
+      WHERE id = ?
+      `
+    )
+    .bind(
+      input.title ?? current.title,
+      input.description ?? current.description,
+      input.sortOrder ?? current.sort_order,
+      input.now,
+      imageId
+    )
+    .run();
+
+  await db.prepare("UPDATE albums SET updated_at = ? WHERE id = ?").bind(input.now, current.album_id).run();
+
+  return getImage(db, imageId);
+}
+
+export async function deleteImage(db: D1Database, imageId: string): Promise<void> {
+  const current = await getImage(db, imageId);
+  if (!current) {
+    return;
+  }
+
+  await db.prepare("DELETE FROM images WHERE id = ?").bind(imageId).run();
+
+  const coverAlbum = await db
+    .prepare("SELECT id FROM albums WHERE id = ? AND cover_image_id = ?")
+    .bind(current.album_id, imageId)
+    .first<{ id: string }>();
+
+  const replacement = await db
+    .prepare(
+      `
+      SELECT id FROM images
+      WHERE album_id = ?
+      ORDER BY sort_order ASC, created_at DESC, id ASC
+      LIMIT 1
+      `
+    )
+    .bind(current.album_id)
+    .first<{ id: string }>();
+
+  if (coverAlbum) {
+    await db
+      .prepare("UPDATE albums SET cover_image_id = ?, updated_at = ? WHERE id = ?")
+      .bind(replacement?.id ?? null, new Date().toISOString(), current.album_id)
+      .run();
+  }
+}
+
+function toAlbum(row: AlbumListRow): Album {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    is_public: toBoolean(row.is_public),
+    has_access_key: Boolean(row.access_key),
+    cover_image_id: row.cover_image_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    image_count: toNumber(row.image_count),
+    total_size_bytes: toNumber(row.total_size_bytes),
+    cover_image: toBoolean(row.is_public) && row.cover_id
+      ? {
+          id: row.cover_id,
+          album_id: row.cover_album_id ?? row.id,
+          r2_key: row.cover_r2_key ?? "",
+          filename: row.cover_filename ?? "",
+          content_type: row.cover_content_type ?? "application/octet-stream",
+          size_bytes: toNumber(row.cover_size_bytes),
+          width: toNullableNumber(row.cover_width),
+          height: toNullableNumber(row.cover_height),
+          title: row.cover_title ?? "",
+          description: row.cover_description ?? "",
+          sort_order: toNumber(row.cover_sort_order),
+          created_at: row.cover_created_at ?? row.created_at,
+          updated_at: row.cover_updated_at ?? row.updated_at
+        }
+      : null
+  };
+}
+
+function toImage(row: GalleryImage): GalleryImage {
+  return {
+    ...row,
+    size_bytes: toNumber(row.size_bytes),
+    width: toNullableNumber(row.width),
+    height: toNullableNumber(row.height),
+    sort_order: toNumber(row.sort_order)
+  };
+}
+
+function toNumber(value: number | string | null | undefined): number {
+  return Number(value ?? 0);
+}
+
+function toNullableNumber(value: number | string | null | undefined): number | null {
+  return value === null || value === undefined ? null : Number(value);
+}
+
+function toBoolean(value: number | string | boolean | null | undefined): boolean {
+  return value === true || value === 1 || value === "1";
+}
