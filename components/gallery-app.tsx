@@ -5,7 +5,7 @@ import {
   apiJson,
   appendAlbumAccessKey,
   createAdminHeaders,
-  createAlbumAccessHeaders,
+  createAlbumAccessHeaders
 } from "@/components/gallery-client";
 import {
   Folder,
@@ -34,12 +34,13 @@ export function GalleryApp() {
   const [selectedAlbumId, setSelectedAlbumId] = useState("");
   const [selectedImageId, setSelectedImageId] = useState("");
   const [suppressedOverlayImageId, setSuppressedOverlayImageId] = useState("");
-  const [albumAccessKeys, setAlbumAccessKeys] = useState<Record<string, string>>({});
+  const [privateAlbumAccessKey, setPrivateAlbumAccessKey] = useState("");
+  const [privateAlbumAccessKeyDraft, setPrivateAlbumAccessKeyDraft] = useState("");
+  const [hasPrivateAlbumAccessKey, setHasPrivateAlbumAccessKey] = useState(false);
   const [albumEdit, setAlbumEdit] = useState({
     title: "",
     description: "",
-    isPublic: true,
-    accessKey: ""
+    isPublic: true
   });
   const [imageEdit, setImageEdit] = useState({ title: "", description: "" });
   const [query, setQuery] = useState("");
@@ -83,12 +84,16 @@ export function GalleryApp() {
 
     async function loadInitialAlbums() {
       try {
-        const loadedAlbums = await apiJson<Album[]>("/api/albums");
+        const [loadedAlbums, accessKeySetting] = await Promise.all([
+          apiJson<Album[]>("/api/albums"),
+          apiJson<{ hasAccessKey: boolean }>("/api/settings/private-album-access-key")
+        ]);
         if (cancelled) {
           return;
         }
 
         setAlbums(loadedAlbums);
+        setHasPrivateAlbumAccessKey(accessKeySetting.hasAccessKey);
       } catch (error) {
         showError(error);
       } finally {
@@ -118,7 +123,7 @@ export function GalleryApp() {
       } else {
         setSelectedAlbumId("");
         setSelectedImageId("");
-        setAlbumEdit({ title: "", description: "", isPublic: true, accessKey: "" });
+        setAlbumEdit({ title: "", description: "", isPublic: true });
         setImageEdit({ title: "", description: "" });
         setImages([]);
       }
@@ -129,7 +134,7 @@ export function GalleryApp() {
     }
   }
 
-  async function refreshImages(albumId = selectedAlbumId, accessKey = albumAccessKeys[albumId] ?? "") {
+  async function refreshImages(albumId = selectedAlbumId, accessKey = privateAlbumAccessKey) {
     if (!albumId) {
       return;
     }
@@ -163,7 +168,7 @@ export function GalleryApp() {
   function returnToAlbums() {
     setSelectedAlbumId("");
     setImages([]);
-    setAlbumEdit({ title: "", description: "", isPublic: true, accessKey: "" });
+    setAlbumEdit({ title: "", description: "", isPublic: true });
     applyImageSelection(null);
   }
 
@@ -172,8 +177,7 @@ export function GalleryApp() {
     setAlbumEdit({
       title: album.title,
       description: album.description,
-      isPublic: album.is_public,
-      accessKey: ""
+      isPublic: album.is_public
     });
   }
 
@@ -182,23 +186,23 @@ export function GalleryApp() {
       return "";
     }
 
-    const existingAccessKey = albumAccessKeys[album.id];
-    if (existingAccessKey) {
-      return existingAccessKey;
+    if (privateAlbumAccessKey) {
+      return privateAlbumAccessKey;
     }
 
-    const accessKey = window.prompt(`请输入「${album.title}」的访问密钥`);
+    const accessKey = window.prompt("请输入非公开相册密钥");
     if (!accessKey?.trim()) {
       return null;
     }
 
     const normalizedAccessKey = accessKey.trim();
-    setAlbumAccessKeys((current) => ({ ...current, [album.id]: normalizedAccessKey }));
+    setPrivateAlbumAccessKey(normalizedAccessKey);
+    setPrivateAlbumAccessKeyDraft(normalizedAccessKey);
     return normalizedAccessKey;
   }
 
   function selectedAlbumAccessKey(): string {
-    return selectedAlbum ? albumAccessKeys[selectedAlbum.id] ?? "" : "";
+    return selectedAlbum?.is_public ? "" : privateAlbumAccessKey;
   }
 
   function applyImageSelection(image: GalleryImage | null) {
@@ -233,17 +237,29 @@ export function GalleryApp() {
         body: JSON.stringify({
           title: albumEdit.title,
           description: albumEdit.description,
-          isPublic: albumEdit.isPublic,
-          accessKey: albumEdit.accessKey || undefined
+          isPublic: albumEdit.isPublic
         })
       });
 
       setAlbums((current) => current.map((item) => (item.id === album.id ? album : item)));
       applyAlbumSelection(album);
-      if (!album.is_public && albumEdit.accessKey) {
-        setAlbumAccessKeys((current) => ({ ...current, [album.id]: albumEdit.accessKey }));
-      }
       setNotice({ tone: "success", text: "相册信息已保存" });
+    });
+  }
+
+  async function savePrivateAlbumAccessKey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    await mutate(async () => {
+      const setting = await apiJson<{ hasAccessKey: boolean }>("/api/settings/private-album-access-key", {
+        method: "PATCH",
+        headers: createAdminHeaders("", { "content-type": "application/json" }),
+        body: JSON.stringify({ accessKey: privateAlbumAccessKeyDraft })
+      });
+
+      setHasPrivateAlbumAccessKey(setting.hasAccessKey);
+      setPrivateAlbumAccessKey(privateAlbumAccessKeyDraft.trim());
+      setNotice({ tone: "success", text: "非公开相册密钥已保存" });
     });
   }
 
@@ -265,7 +281,7 @@ export function GalleryApp() {
       } else {
         setSelectedAlbumId("");
         setSelectedImageId("");
-        setAlbumEdit({ title: "", description: "", isPublic: true, accessKey: "" });
+        setAlbumEdit({ title: "", description: "", isPublic: true });
         setImageEdit({ title: "", description: "" });
         setImages([]);
       }
@@ -385,6 +401,28 @@ export function GalleryApp() {
           <div className={`notice ${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
             {notice.text}
           </div>
+        ) : null}
+
+        {!selectedAlbum ? (
+          <form className="album-key-panel" onSubmit={savePrivateAlbumAccessKey}>
+            <div>
+              <p className="section-label">非公开相册</p>
+              <h3>访问密钥</h3>
+              <span>{hasPrivateAlbumAccessKey ? "已设置。更新后所有非公开相册使用新密钥。" : "尚未设置。非公开相册需要这个密钥才能访问。"}</span>
+            </div>
+            <label>
+              密钥
+              <input
+                onChange={(event) => setPrivateAlbumAccessKeyDraft(event.target.value)}
+                placeholder="设置所有非公开相册共用的访问密钥"
+                type="password"
+                value={privateAlbumAccessKeyDraft}
+              />
+            </label>
+            <button className="secondary-button" disabled={mutating} type="submit">
+              {hasPrivateAlbumAccessKey ? "更新密钥" : "设置密钥"}
+            </button>
+          </form>
         ) : null}
 
         {!selectedAlbum ? (
@@ -513,20 +551,6 @@ export function GalleryApp() {
             />
             公开相册
           </label>
-          {!albumEdit.isPublic ? (
-            <label>
-              访问密钥
-              <input
-                disabled={!selectedAlbum}
-                onChange={(event) =>
-                  setAlbumEdit((current) => ({ ...current, accessKey: event.target.value }))
-                }
-                placeholder={selectedAlbum?.has_access_key ? "留空则保持原密钥" : "非公开相册必须设置"}
-                type="password"
-                value={albumEdit.accessKey}
-              />
-            </label>
-          ) : null}
           <div className="button-row">
             <button className="secondary-button danger" disabled={!selectedAlbum || mutating} onClick={removeAlbum} type="button">
               <Trash2 aria-hidden="true" size={16} />

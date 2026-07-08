@@ -1,4 +1,4 @@
-import { deleteImage, getAlbum, getAlbumAccessKey, getImage, updateImage } from "@/lib/db/gallery";
+import { deleteImage, getAlbum, getImage, getPrivateAlbumAccessKey, updateImage } from "@/lib/db/gallery";
 import { getBindings } from "@/lib/cloudflare";
 import { assertAlbumAccessKey, requireAdmin } from "@/lib/http/admin";
 import { unwrapParams } from "@/lib/http/params";
@@ -25,7 +25,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     if (!album) {
       throw new HttpError(404, "相册不存在", "album_not_found");
     }
-    assertAlbumAccessKey(request, env, album, await getAlbumAccessKey(env.DB, image.album_id));
+    assertAlbumAccessKey(request, env, album, await getPrivateAlbumAccessKey(env.DB));
 
     return ok(image);
   } catch (error) {

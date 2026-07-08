@@ -6,7 +6,7 @@ This workspace is for a web photo gallery application.
 
 The application must be built with Next.js and deployed to Cloudflare Workers. Image binary data must be stored in Cloudflare R2 object storage. Image and album metadata must be stored in Cloudflare D1, which is SQLite-compatible.
 
-The product must support uploading, browsing, creating, editing, and deleting albums and images. Every album and every image must have its own editable description text. Albums support public/private visibility: public albums are readable by anyone, while private albums require that album's access key to read images.
+The product must support uploading, browsing, creating, editing, and deleting albums and images. Every album and every image must have its own editable description text. Albums support public/private visibility: public albums are readable by anyone, while private albums require the shared private-album access key set from the album view.
 
 The application should prioritize fast image loading and a responsive browsing experience.
 
@@ -19,7 +19,8 @@ The application should prioritize fast image loading and a responsive browsing e
   - List albums.
   - View album detail.
   - Update album title/description and other metadata.
-  - Update album public/private visibility and private album access key.
+  - Update album public/private visibility.
+  - Manage the shared private-album access key from the album view.
   - Delete album.
 - Support image CRUD:
   - Upload images into albums.
@@ -57,7 +58,6 @@ Suggested fields:
 - `title`: album title.
 - `description`: album description text.
 - `is_public`: whether the album can be viewed without an access key.
-- `access_key`: private album read key; do not expose it in public API responses.
 - `cover_image_id`: optional image used as album cover.
 - `created_at`: creation timestamp.
 - `updated_at`: update timestamp.

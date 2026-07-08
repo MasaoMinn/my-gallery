@@ -1,7 +1,7 @@
 import {
   deleteAlbum,
   getAlbum,
-  getAlbumAccessKey,
+  getPrivateAlbumAccessKey,
   listAlbumImagesForDelete,
   updateAlbum
 } from "@/lib/db/gallery";
@@ -28,7 +28,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       throw new HttpError(404, "相册不存在", "album_not_found");
     }
 
-    assertAlbumAccessKey(request, env, album, await getAlbumAccessKey(env.DB, albumId));
+    assertAlbumAccessKey(request, env, album, await getPrivateAlbumAccessKey(env.DB));
 
     return ok(album);
   } catch (error) {
@@ -47,15 +47,11 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
     if (!current) {
       throw new HttpError(404, "相册不存在", "album_not_found");
     }
-    if (input.isPublic === false && !input.accessKey && !current.has_access_key) {
-      throw new HttpError(400, "非公开相册必须设置访问密钥", "album_access_key_required");
-    }
 
     const album = await updateAlbum(env.DB, albumId, {
       title: input.title,
       description: input.description,
       isPublic: input.isPublic,
-      accessKey: input.accessKey,
       coverImageId: input.coverImageId,
       now: new Date().toISOString()
     });

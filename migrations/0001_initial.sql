@@ -31,3 +31,12 @@ CREATE TABLE IF NOT EXISTS images (
 
 CREATE INDEX IF NOT EXISTS idx_images_album_sort ON images(album_id, sort_order, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_albums_updated ON albums(updated_at DESC, id);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+VALUES ('private_album_access_key', '', CURRENT_TIMESTAMP);

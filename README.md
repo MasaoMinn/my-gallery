@@ -16,7 +16,7 @@ Open `http://127.0.0.1:3000`.
 - Browse/edit albums and images on `/`.
 - Create albums on `/upload`.
 - Upload images from an opened album on `/albums/{albumId}/upload`.
-- Public albums can be opened by anyone. Private albums require that album's access key to view images.
+- Public albums can be opened by anyone. Private albums require the shared private-album access key set from the album view.
 
 ## Verification
 
@@ -52,7 +52,7 @@ pnpm run deploy
 
 The UI does not ask users for an administrator token. Images are always written to the configured R2 binding in `wrangler.jsonc`.
 
-`GALLERY_ADMIN_TOKEN` is optional. If configured as a Worker secret, it protects write APIs, but the current user-facing UI does not expose a token input. Per-album access keys are separate and only unlock private album viewing.
+`GALLERY_ADMIN_TOKEN` is optional. If configured as a Worker secret, it protects write APIs, but the current user-facing UI does not expose a token input. The private-album access key is separate and only unlocks private album viewing.
 
 ## Tokens And Secrets Needed For Deployment
 

@@ -1,19 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { albumCreateSchema, imageUpdateSchema } from "@/lib/validation/schemas";
+import {
+  albumCreateSchema,
+  imageUpdateSchema,
+  privateAlbumAccessKeyUpdateSchema
+} from "@/lib/validation/schemas";
 
 describe("gallery schemas", () => {
   it("trims album input", () => {
     expect(albumCreateSchema.parse({ title: "  旅行  ", description: "  夏天  " })).toEqual({
       title: "旅行",
       description: "夏天",
-      isPublic: true,
-      accessKey: ""
+      isPublic: true
     });
   });
 
-  it("requires an access key for private albums", () => {
-    expect(() => albumCreateSchema.parse({ title: "私密", isPublic: false })).toThrow(
-      "非公开相册必须设置访问密钥"
+  it("requires a global private album access key value", () => {
+    expect(() => privateAlbumAccessKeyUpdateSchema.parse({ accessKey: " " })).toThrow(
+      "非公开相册密钥不能为空"
     );
   });
 

@@ -27,7 +27,6 @@ export async function POST(request: Request): Promise<Response> {
       title: input.title,
       description: input.description,
       isPublic: input.isPublic,
-      accessKey: input.accessKey,
       now
     });
 

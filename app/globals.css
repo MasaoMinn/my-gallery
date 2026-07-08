@@ -339,6 +339,33 @@ label {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
+.album-key-panel {
+  align-items: end;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 0.05);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr) auto;
+  margin-bottom: 18px;
+  padding: 16px;
+}
+
+.album-key-panel h3,
+.album-key-panel p,
+.album-key-panel span {
+  margin: 0;
+}
+
+.album-key-panel span {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+  line-height: 1.55;
+  margin-top: 4px;
+}
+
 .album-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -732,10 +759,16 @@ label {
 
   .workspace-header,
   .toolbar,
+  .album-key-panel,
   .quick-settings,
   .button-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .album-key-panel {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .quick-settings label:first-child {

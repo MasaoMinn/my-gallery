@@ -57,11 +57,7 @@ export function requireAlbumReadAccess(request: Request, env: CloudflareEnv, alb
     return;
   }
 
-  if (!album.has_access_key) {
-    throw new HttpError(403, "这个相册未配置访问密钥，请联系管理员", "album_access_key_missing");
-  }
-
-  throw new HttpError(401, "请输入相册访问密钥", "album_access_required");
+  throw new HttpError(401, "请输入非公开相册密钥", "album_access_required");
 }
 
 export function assertAlbumAccessKey(
@@ -74,7 +70,11 @@ export function assertAlbumAccessKey(
     return;
   }
 
+  if (!storedAccessKey) {
+    throw new HttpError(403, "非公开相册密钥尚未设置", "album_access_key_missing");
+  }
+
   if (readAlbumAccessKey(request) !== storedAccessKey) {
-    throw new HttpError(401, "相册访问密钥无效或缺失", "album_access_required");
+    throw new HttpError(401, "非公开相册密钥无效或缺失", "album_access_required");
   }
 }

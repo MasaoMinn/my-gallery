@@ -3,7 +3,6 @@ export type Album = {
   title: string;
   description: string;
   is_public: boolean;
-  has_access_key: boolean;
   cover_image_id: string | null;
   created_at: string;
   updated_at: string;
@@ -35,7 +34,6 @@ type AlbumListRow = {
   title: string;
   description: string;
   is_public: number | string | null;
-  access_key: string | null;
   cover_image_id: string | null;
   created_at: string;
   updated_at: string;
@@ -94,13 +92,13 @@ export async function listAlbums(db: D1Database): Promise<Album[]> {
 
 export async function createAlbum(
   db: D1Database,
-  input: { id: string; title: string; description: string; isPublic: boolean; accessKey: string; now: string }
+  input: { id: string; title: string; description: string; isPublic: boolean; now: string }
 ): Promise<Album> {
   await db
     .prepare(
       `
       INSERT INTO albums (id, title, description, is_public, access_key, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, '', ?, ?)
       `
     )
     .bind(
@@ -108,7 +106,6 @@ export async function createAlbum(
       input.title,
       input.description,
       input.isPublic ? 1 : 0,
-      input.isPublic ? "" : input.accessKey,
       input.now,
       input.now
     )
@@ -166,7 +163,6 @@ export async function updateAlbum(
     title?: string;
     description?: string;
     isPublic?: boolean;
-    accessKey?: string;
     coverImageId?: string | null;
     now: string;
   }
@@ -177,13 +173,12 @@ export async function updateAlbum(
   }
 
   const nextIsPublic = input.isPublic ?? current.is_public;
-  const nextAccessKey = nextIsPublic ? "" : input.accessKey ?? (await getAlbumAccessKey(db, albumId));
 
   await db
     .prepare(
       `
       UPDATE albums
-      SET title = ?, description = ?, is_public = ?, access_key = ?, cover_image_id = ?, updated_at = ?
+      SET title = ?, description = ?, is_public = ?, cover_image_id = ?, updated_at = ?
       WHERE id = ?
       `
     )
@@ -191,7 +186,6 @@ export async function updateAlbum(
       input.title ?? current.title,
       input.description ?? current.description,
       nextIsPublic ? 1 : 0,
-      nextAccessKey,
       input.coverImageId === undefined ? current.cover_image_id : input.coverImageId,
       input.now,
       albumId
@@ -238,13 +232,32 @@ export async function getImage(db: D1Database, imageId: string): Promise<Gallery
   return row ? toImage(row) : null;
 }
 
-export async function getAlbumAccessKey(db: D1Database, albumId: string): Promise<string> {
+export async function getPrivateAlbumAccessKey(db: D1Database): Promise<string> {
+  await ensureSettingsTable(db);
   const row = await db
-    .prepare("SELECT access_key FROM albums WHERE id = ?")
-    .bind(albumId)
-    .first<{ access_key: string | null }>();
+    .prepare("SELECT value FROM app_settings WHERE key = 'private_album_access_key'")
+    .first<{ value: string | null }>();
 
-  return row?.access_key ?? "";
+  return row?.value ?? "";
+}
+
+export async function updatePrivateAlbumAccessKey(
+  db: D1Database,
+  input: { accessKey: string; now: string }
+): Promise<{ hasAccessKey: boolean }> {
+  await ensureSettingsTable(db);
+  await db
+    .prepare(
+      `
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES ('private_album_access_key', ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `
+    )
+    .bind(input.accessKey, input.now)
+    .run();
+
+  return { hasAccessKey: Boolean(input.accessKey) };
 }
 
 export async function createImage(
@@ -386,7 +399,6 @@ function toAlbum(row: AlbumListRow): Album {
     title: row.title,
     description: row.description,
     is_public: toBoolean(row.is_public),
-    has_access_key: Boolean(row.access_key),
     cover_image_id: row.cover_image_id,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -432,4 +444,27 @@ function toNullableNumber(value: number | string | null | undefined): number | n
 
 function toBoolean(value: number | string | boolean | null | undefined): boolean {
   return value === true || value === 1 || value === "1";
+}
+
+async function ensureSettingsTable(db: D1Database): Promise<void> {
+  await db
+    .prepare(
+      `
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+      )
+      `
+    )
+    .run();
+
+  await db
+    .prepare(
+      `
+      INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+      VALUES ('private_album_access_key', '', CURRENT_TIMESTAMP)
+      `
+    )
+    .run();
 }

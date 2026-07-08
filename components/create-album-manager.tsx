@@ -15,8 +15,7 @@ export function CreateAlbumManager() {
   const [albumDraft, setAlbumDraft] = useState({
     title: "",
     description: "",
-    isPublic: true,
-    accessKey: ""
+    isPublic: true
   });
   const [createdAlbum, setCreatedAlbum] = useState<Album | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -45,7 +44,7 @@ export function CreateAlbumManager() {
       });
 
       setCreatedAlbum(album);
-      setAlbumDraft({ title: "", description: "", isPublic: true, accessKey: "" });
+      setAlbumDraft({ title: "", description: "", isPublic: true });
       setNotice({ tone: "success", text: "相册已创建。请返回相册页，点开该相册后上传图片。" });
     } catch (error) {
       showError(error);
@@ -110,17 +109,7 @@ export function CreateAlbumManager() {
             公开相册
           </label>
           {!albumDraft.isPublic ? (
-            <label>
-              访问密钥
-              <input
-                onChange={(event) =>
-                  setAlbumDraft((current) => ({ ...current, accessKey: event.target.value }))
-                }
-                placeholder="访问非公开相册时需要输入"
-                type="password"
-                value={albumDraft.accessKey}
-              />
-            </label>
+            <p className="empty-copy">非公开相册会使用相册视图中设置的全局访问密钥。</p>
           ) : null}
           <button className="primary-button" disabled={mutating} type="submit">
             {mutating ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <Plus aria-hidden="true" size={16} />}

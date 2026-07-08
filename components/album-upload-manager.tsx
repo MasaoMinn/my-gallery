@@ -155,13 +155,13 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
         <div className="upload-card">
           <div className="panel-heading">
             <p className="section-label">访问</p>
-            <h2>相册访问密钥</h2>
+            <h2>非公开相册密钥</h2>
           </div>
           <label>
-            相册访问密钥
+            非公开相册密钥
             <input
               onChange={(event) => setAlbumAccessKey(event.target.value)}
-              placeholder="非公开相册用于预览图片，可选"
+              placeholder="所有非公开相册共用，可选"
               type="password"
               value={albumAccessKey}
             />
