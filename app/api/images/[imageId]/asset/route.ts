@@ -7,7 +7,7 @@ import { handleRouteError, HttpError } from "@/lib/http/responses";
 export const dynamic = "force-dynamic";
 
 type RouteContext = {
-  params: Promise<{ imageId: string }> | { imageId: string };
+  params: Promise<{ imageId: string }>;
 };
 
 export async function GET(request: Request, context: RouteContext): Promise<Response> {

@@ -11,7 +11,7 @@ import { imageUploadMetadataSchema } from "@/lib/validation/schemas";
 export const dynamic = "force-dynamic";
 
 type RouteContext = {
-  params: Promise<{ albumId: string }> | { albumId: string };
+  params: Promise<{ albumId: string }>;
 };
 
 export async function GET(request: Request, context: RouteContext): Promise<Response> {
