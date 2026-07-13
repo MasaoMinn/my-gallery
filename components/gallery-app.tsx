@@ -11,6 +11,8 @@ import {
   apiJson
 } from "@/components/gallery-client";
 import { useAdminSession } from "@/components/admin-session";
+import { ImageMasonry } from "@/components/image-masonry";
+import type { ImageSize } from "@/lib/images/masonry";
 import {
   Folder,
   Globe2,
@@ -38,8 +40,6 @@ type Notice = {
   tone: "success" | "error" | "info";
   text: string;
 };
-
-type ImageSize = "xlarge" | "large" | "medium" | "small" | "xsmall";
 
 const IMAGE_SIZE_OPTIONS: Array<{ value: ImageSize; label: string; columns: number }> = [
   { value: "xlarge", label: "特大", columns: 3 },
@@ -544,33 +544,19 @@ export function GalleryApp() {
             )}
           </div>
         ) : (
-          <div className={`image-grid image-size-${imageSize}`} aria-busy={loadingImages}>
-            {loadingImages ? (
-              Array.from({ length: 8 }).map((_, index) => <div className="image-skeleton" key={index} />)
-            ) : images.length > 0 ? (
-              images.map((image) => (
-                <button
-                  className="image-card"
-                  key={image.id}
-                  onClick={() => openImage(image)}
-                  style={{ aspectRatio: getAspectRatio(image) }}
-                  type="button"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    alt={image.description || "相册图片"}
-                    height={image.height ?? undefined}
-                    loading="lazy"
-                    src={`/api/images/${image.id}/asset`}
-                    width={image.width ?? undefined}
-                  />
-                  <span className="image-overlay">
-                    <strong>{image.description || "暂无图片描述"}</strong>
-                    <small>{formatBytes(image.size_bytes)}</small>
-                  </span>
-                </button>
-              ))
-            ) : (
+          loadingImages ? (
+            <div className={`image-grid image-size-${imageSize}`} aria-busy="true">
+              {Array.from({ length: 8 }).map((_, index) => <div className="image-skeleton" key={index} />)}
+            </div>
+          ) : images.length > 0 ? (
+            <ImageMasonry
+              formatSize={formatBytes}
+              images={images}
+              imageSize={imageSize}
+              onOpenImage={openImage}
+            />
+          ) : (
+            <div className={`image-grid image-size-${imageSize}`} aria-busy="false">
               <div className="empty-gallery">
                 <ImageIcon aria-hidden="true" size={34} />
                 <h3>最近上传</h3>
@@ -581,8 +567,8 @@ export function GalleryApp() {
                   </Link>
                 ) : null}
               </div>
-            )}
-          </div>
+            </div>
+          )
         )}
       </section>
 
@@ -805,14 +791,6 @@ export function GalleryApp() {
       ) : null}
     </main>
   );
-}
-
-function getAspectRatio(image: GalleryImage): string {
-  if (image.width && image.height) {
-    return `${image.width} / ${image.height}`;
-  }
-
-  return "4 / 3";
 }
 
 function formatBytes(bytes: number): string {

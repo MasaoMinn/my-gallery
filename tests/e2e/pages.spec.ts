@@ -72,6 +72,57 @@ test("visitors can browse public image details but cannot see management control
   await expect(dialog).not.toContainText("hidden.jpg");
 });
 
+test("wide images span two columns without refetching image assets when the size changes", async ({ page }, testInfo) => {
+  const mixedImages = [
+    { ...image, id: "wide-image", width: 1800, height: 900, description: "宽图" },
+    { ...image, id: "square-image", width: 1000, height: 1000, description: "方图" },
+    { ...image, id: "portrait-image", width: 800, height: 1600, description: "竖图" }
+  ];
+  const assetRequests = new Map<string, number>();
+  let imageListRequests = 0;
+
+  await mockSession(page, false);
+  await page.route("**/api/albums", (route) => route.fulfill({ json: { data: [album] } }));
+  await page.route("**/api/albums/album-1/images", (route) => {
+    imageListRequests += 1;
+    return route.fulfill({ json: { data: mixedImages } });
+  });
+  await page.route("**/api/images/*/asset", (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-2) ?? "unknown";
+    assetRequests.set(id, (assetRequests.get(id) ?? 0) + 1);
+    return route.fulfill({
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64"
+      ),
+      contentType: "image/png"
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /测试相册/ }).click();
+  const grid = page.locator(".image-grid");
+  await expect(grid).toHaveClass(/masonry-ready/);
+  await expect(page.locator(".image-card")).toHaveCount(3);
+
+  const wideCard = page.locator('[data-column-span="2"]');
+  const squareCard = page.locator(".image-card").filter({ has: page.getByAltText("方图") });
+  const wideBox = await wideCard.boundingBox();
+  const squareBox = await squareCard.boundingBox();
+  expect(wideBox).not.toBeNull();
+  expect(squareBox).not.toBeNull();
+  expect(wideBox!.width).toBeCloseTo(squareBox!.width * 2 + (testInfo.project.name === "mobile-chrome" ? 12 : 14), 0);
+
+  await expect.poll(() => assetRequests.size).toBe(3);
+  const requestsBeforeResize = new Map(assetRequests);
+  await page.getByRole("button", { name: "特小，桌面端一行 8 张图" }).click();
+  await expect(grid).toHaveClass(/image-size-xsmall/);
+  await page.waitForTimeout(250);
+
+  expect(imageListRequests).toBe(1);
+  expect(assetRequests).toEqual(requestsBeforeResize);
+});
+
 test("administrators edit albums and explicitly enter image description edit mode", async ({ page }) => {
   await mockSession(page, true);
   await mockGallery(page);

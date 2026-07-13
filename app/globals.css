@@ -810,45 +810,58 @@ label {
 }
 
 .image-grid {
-  column-gap: 14px;
-  display: block;
+  --image-columns: 5;
+
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(var(--image-columns), minmax(0, 1fr));
   min-height: 360px;
 }
 
 .image-grid.image-size-xlarge {
-  column-count: 3;
+  --image-columns: 3;
 }
 
 .image-grid.image-size-large {
-  column-count: 4;
+  --image-columns: 4;
 }
 
 .image-grid.image-size-medium {
-  column-count: 5;
+  --image-columns: 5;
 }
 
 .image-grid.image-size-small {
-  column-count: 6;
+  --image-columns: 6;
 }
 
 .image-grid.image-size-xsmall {
-  column-count: 8;
+  --image-columns: 8;
+}
+
+.image-grid.masonry-ready {
+  display: block;
+  position: relative;
 }
 
 .image-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  break-inside: avoid;
   box-shadow: 0 8px 24px rgb(15 23 42 / 0.05);
   color: var(--text);
   display: block;
-  margin: 0 0 14px;
+  margin: 0;
   overflow: hidden;
   padding: 0;
   position: relative;
   text-align: left;
   width: 100%;
+}
+
+.image-grid.masonry-ready .image-card {
+  left: 0;
+  position: absolute;
+  top: 0;
 }
 
 .image-card img {
@@ -894,9 +907,7 @@ label {
     linear-gradient(90deg, transparent, rgb(255 255 255 / 0.72), transparent),
     var(--surface-strong);
   background-size: 220px 100%, 100% 100%;
-  break-inside: avoid;
   border-radius: var(--radius);
-  margin-bottom: 14px;
   overflow: hidden;
 }
 
@@ -915,7 +926,7 @@ label {
 }
 
 .image-grid > .empty-gallery {
-  column-span: all;
+  grid-column: 1 / -1;
 }
 
 .empty-gallery h3 {
@@ -1021,17 +1032,17 @@ label {
   }
 
   .image-grid.image-size-xlarge {
-    column-count: 2;
+    --image-columns: 2;
   }
 
   .image-grid.image-size-large,
   .image-grid.image-size-medium {
-    column-count: 3;
+    --image-columns: 3;
   }
 
   .image-grid.image-size-small,
   .image-grid.image-size-xsmall {
-    column-count: 4;
+    --image-columns: 4;
   }
 }
 
@@ -1102,22 +1113,18 @@ label {
   }
 
   .image-grid {
-    column-gap: 12px;
+    gap: 12px;
   }
 
   .image-grid.image-size-xlarge,
   .image-grid.image-size-large {
-    column-count: 1;
+    --image-columns: 1;
   }
 
   .image-grid.image-size-medium,
   .image-grid.image-size-small,
   .image-grid.image-size-xsmall {
-    column-count: 2;
-  }
-
-  .image-card {
-    margin-bottom: 12px;
+    --image-columns: 2;
   }
 
   .modal-backdrop {
