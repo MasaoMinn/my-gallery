@@ -20,6 +20,7 @@ import {
   LogOut,
   Lock,
   Pencil,
+  Plus,
   RefreshCw,
   Save,
   Search,
@@ -38,15 +39,31 @@ type Notice = {
   text: string;
 };
 
+type ImageSize = "xlarge" | "large" | "medium" | "small" | "xsmall";
+
+const IMAGE_SIZE_OPTIONS: Array<{ value: ImageSize; label: string; columns: number }> = [
+  { value: "xlarge", label: "特大", columns: 3 },
+  { value: "large", label: "大", columns: 4 },
+  { value: "medium", label: "中", columns: 5 },
+  { value: "small", label: "小", columns: 6 },
+  { value: "xsmall", label: "特小", columns: 8 }
+];
+
 export function GalleryApp() {
   const { authenticated, loading: loadingAdmin, logout } = useAdminSession();
   const [albums, setAlbums] = useState<Album[]>([]);
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState("");
   const [selectedImageId, setSelectedImageId] = useState("");
+  const [albumCreateOpen, setAlbumCreateOpen] = useState(false);
   const [albumEditOpen, setAlbumEditOpen] = useState(false);
   const [imageEditing, setImageEditing] = useState(false);
   const [albumEdit, setAlbumEdit] = useState({
+    title: "",
+    description: "",
+    isPublic: true
+  });
+  const [albumCreate, setAlbumCreate] = useState({
     title: "",
     description: "",
     isPublic: true
@@ -55,6 +72,7 @@ export function GalleryApp() {
   const [query, setQuery] = useState("");
   const [albumSortField, setAlbumSortField] = useState<AlbumSortField>("updatedAt");
   const [albumSortDirection, setAlbumSortDirection] = useState<SortDirection>("desc");
+  const [imageSize, setImageSize] = useState<ImageSize>("medium");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [loadingAlbums, setLoadingAlbums] = useState(true);
   const [loadingImages, setLoadingImages] = useState(false);
@@ -202,6 +220,29 @@ export function GalleryApp() {
       applyAlbumSelection(selectedAlbum);
     }
     setAlbumEditOpen(false);
+  }
+
+  function closeAlbumCreate() {
+    setAlbumCreateOpen(false);
+    setAlbumCreate({ title: "", description: "", isPublic: true });
+  }
+
+  async function createAlbum(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await mutate(async () => {
+      const album = await apiJson<Album>("/api/albums", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(albumCreate)
+      });
+
+      setAlbums((current) => [album, ...current]);
+      applyAlbumSelection(album);
+      applyImageSelection(null);
+      setImages([]);
+      closeAlbumCreate();
+      setNotice({ tone: "success", text: `相册「${album.title}」已创建` });
+    });
   }
 
   async function saveAlbum(event: FormEvent<HTMLFormElement>) {
@@ -398,6 +439,26 @@ export function GalleryApp() {
                 </button>
               </>
             ) : null}
+            {selectedAlbum ? (
+              <div aria-label="图片大小" className="image-size-control" role="group">
+                <ImageIcon aria-hidden="true" size={17} />
+                <span>图片大小</span>
+                <div className="image-size-segments">
+                  {IMAGE_SIZE_OPTIONS.map((option) => (
+                    <button
+                      aria-label={`${option.label}，桌面端一行 ${option.columns} 张图`}
+                      aria-pressed={imageSize === option.value}
+                      key={option.value}
+                      onClick={() => setImageSize(option.value)}
+                      title={`桌面端一行 ${option.columns} 张图`}
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <button className="secondary-button" onClick={() => void refreshAlbums()} type="button">
               <RefreshCw aria-hidden="true" size={16} />
               刷新
@@ -410,10 +471,14 @@ export function GalleryApp() {
                     上传图片
                   </Link>
                 ) : (
-                  <Link className="primary-button" href="/upload">
+                  <button
+                    className="primary-button"
+                    onClick={() => setAlbumCreateOpen(true)}
+                    type="button"
+                  >
                     <Folder aria-hidden="true" size={17} />
                     新建相册
-                  </Link>
+                  </button>
                 )}
                 <button className="secondary-button" onClick={() => void signOut()} type="button">
                   <LogOut aria-hidden="true" size={16} />
@@ -470,12 +535,16 @@ export function GalleryApp() {
                 <Folder aria-hidden="true" size={34} />
                 <h3>{authenticated ? "创建第一个相册" : "暂无公开相册"}</h3>
                 <p>{authenticated ? "新建相册后即可上传和管理图片。" : "管理员发布公开相册后会显示在这里。"}</p>
-                {authenticated ? <Link className="primary-button" href="/upload">新建相册</Link> : null}
+                {authenticated ? (
+                  <button className="primary-button" onClick={() => setAlbumCreateOpen(true)} type="button">
+                    新建相册
+                  </button>
+                ) : null}
               </div>
             )}
           </div>
         ) : (
-          <div className="image-grid" aria-busy={loadingImages}>
+          <div className={`image-grid image-size-${imageSize}`} aria-busy={loadingImages}>
             {loadingImages ? (
               Array.from({ length: 8 }).map((_, index) => <div className="image-skeleton" key={index} />)
             ) : images.length > 0 ? (
@@ -516,6 +585,71 @@ export function GalleryApp() {
           </div>
         )}
       </section>
+
+      {authenticated && albumCreateOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <form
+            aria-labelledby="album-create-title"
+            aria-modal="true"
+            className="edit-dialog"
+            onSubmit={createAlbum}
+            role="dialog"
+          >
+            <div className="dialog-heading">
+              <div className="panel-heading">
+                <p className="section-label">相册</p>
+                <h2 id="album-create-title">新建相册</h2>
+              </div>
+              <button aria-label="关闭新建相册" className="icon-button" onClick={closeAlbumCreate} type="button">
+                <X aria-hidden="true" size={19} />
+              </button>
+            </div>
+            <label>
+              相册名称
+              <input
+                autoFocus
+                onChange={(event) =>
+                  setAlbumCreate((current) => ({ ...current, title: event.target.value }))
+                }
+                placeholder="例如：2026 夏日旅行"
+                required
+                value={albumCreate.title}
+              />
+            </label>
+            <label>
+              相册描述
+              <textarea
+                onChange={(event) =>
+                  setAlbumCreate((current) => ({ ...current, description: event.target.value }))
+                }
+                placeholder="记录这个相册的背景、地点或说明"
+                rows={5}
+                value={albumCreate.description}
+              />
+            </label>
+            <label className="check-row">
+              <input
+                checked={albumCreate.isPublic}
+                onChange={(event) =>
+                  setAlbumCreate((current) => ({ ...current, isPublic: event.target.checked }))
+                }
+                type="checkbox"
+              />
+              公开相册
+            </label>
+            {!albumCreate.isPublic ? <p className="empty-copy">非公开相册仅管理员登录后可见。</p> : null}
+            <div className="button-row">
+              <button className="secondary-button" disabled={mutating} onClick={closeAlbumCreate} type="button">
+                取消
+              </button>
+              <button className="primary-button" disabled={mutating} type="submit">
+                {mutating ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <Plus aria-hidden="true" size={16} />}
+                创建相册
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {selectedAlbum && authenticated && albumEditOpen ? (
         <div className="modal-backdrop" role="presentation">

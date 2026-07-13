@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   albumCreateSchema,
+  imageDuplicateCheckSchema,
   imageUpdateSchema
 } from "@/lib/validation/schemas";
 
@@ -22,5 +23,16 @@ describe("gallery schemas", () => {
 
   it("requires at least one image update field", () => {
     expect(() => imageUpdateSchema.parse({})).toThrow("至少需要更新一个字段");
+  });
+
+  it("accepts large duplicate-check batches without image data", () => {
+    const files = Array.from({ length: 500 }, (_, index) => ({
+      clientId: String(index),
+      filename: `image-${index}.jpg`,
+      sizeBytes: index + 1,
+      contentType: "image/jpeg"
+    }));
+
+    expect(imageDuplicateCheckSchema.parse({ files }).files).toHaveLength(500);
   });
 });

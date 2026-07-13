@@ -19,7 +19,7 @@
     "enabled": true
   },
   "vars": {
-    "GALLERY_MAX_UPLOAD_MB": "10"
+    "GALLERY_MAX_UPLOAD_MB": "95"
   },
   "d1_databases": [
     {

@@ -220,6 +220,41 @@ export async function listImages(db: D1Database, albumId: string): Promise<Store
   return (result.results ?? []).map(toImage);
 }
 
+export async function listImageIdentities(
+  db: D1Database,
+  albumId: string
+): Promise<Array<{ filename: string; sizeBytes: number; contentType: string }>> {
+  const result = await db
+    .prepare("SELECT filename, size_bytes, content_type FROM images WHERE album_id = ?")
+    .bind(albumId)
+    .all<{ filename: string; size_bytes: number | string; content_type: string }>();
+
+  return (result.results ?? []).map((row) => ({
+    filename: row.filename,
+    sizeBytes: toNumber(row.size_bytes),
+    contentType: row.content_type
+  }));
+}
+
+export async function findDuplicateImage(
+  db: D1Database,
+  albumId: string,
+  identity: { filename: string; sizeBytes: number; contentType: string }
+): Promise<StoredImage | null> {
+  const row = await db
+    .prepare(
+      `
+      SELECT * FROM images
+      WHERE album_id = ? AND filename = ? AND size_bytes = ? AND content_type = ?
+      LIMIT 1
+      `
+    )
+    .bind(albumId, identity.filename, identity.sizeBytes, identity.contentType)
+    .first<StoredImage>();
+
+  return row ? toImage(row) : null;
+}
+
 export async function listAlbumImagesForDelete(
   db: D1Database,
   albumId: string

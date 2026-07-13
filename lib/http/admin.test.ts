@@ -44,6 +44,22 @@ describe("requireAdmin", () => {
     });
   });
 
+  it("accepts equivalent localhost and loopback origins during local development", async () => {
+    const session = await createAdminSession(token);
+    const cookie = createAdminSessionCookie(
+      new Request("http://localhost:3000/api/albums"),
+      session
+    ).split(";")[0];
+    const request = new Request("http://localhost:3000/api/albums", {
+      method: "POST",
+      headers: { cookie, origin: "http://127.0.0.1:3000" }
+    });
+
+    await expect(
+      requireAdmin(request, { GALLERY_ADMIN_TOKEN: token } as CloudflareEnv)
+    ).resolves.toBeUndefined();
+  });
+
   it("retains bearer token access for controlled automation", async () => {
     const request = new Request("https://gallery.example/api/albums", {
       method: "POST",

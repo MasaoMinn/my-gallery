@@ -18,7 +18,7 @@ export async function GET(request: Request): Promise<Response> {
       ok({
         authenticated: await isAdminRequest(request, env),
         tokenConfigured: Boolean(env.GALLERY_ADMIN_TOKEN?.trim()),
-        maxUploadMb: Number(env.GALLERY_MAX_UPLOAD_MB ?? "10")
+        maxUploadMb: Number(env.GALLERY_MAX_UPLOAD_MB ?? "95")
       })
     );
   } catch (error) {

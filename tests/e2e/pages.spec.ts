@@ -28,7 +28,7 @@ const image = {
 async function mockSession(page: Page, authenticated: boolean) {
   await page.route("**/api/admin/session", (route) =>
     route.fulfill({
-      json: { data: { authenticated, tokenConfigured: true, maxUploadMb: 10 } }
+      json: { data: { authenticated, tokenConfigured: true, maxUploadMb: 95 } }
     })
   );
 }
@@ -50,13 +50,16 @@ test("visitors can browse public image details but cannot see management control
 
   await expect(page.getByRole("heading", { name: "My Gallery" })).toBeVisible();
   await expect(page.getByRole("link", { name: "管理员登录" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "新建相册" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "新建相册" })).toHaveCount(0);
   await expect(page.getByLabel("相册排序字段")).toHaveValue("updatedAt");
 
   await page.getByRole("button", { name: /测试相册/ }).click();
   await expect(page.getByRole("button", { name: "编辑相册信息" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "上传图片" })).toHaveCount(0);
   await expect(page.locator("aside")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "中，桌面端一行 5 张图" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "特小，桌面端一行 8 张图" }).click();
+  await expect(page.locator(".image-grid")).toHaveClass(/image-size-xsmall/);
 
   await page.locator(".image-card").click();
   const dialog = page.getByRole("dialog", { name: "查看图片" });
@@ -82,7 +85,7 @@ test("administrators edit albums and explicitly enter image description edit mod
   });
 
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "新建相册" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新建相册" })).toBeVisible();
   await page.getByRole("button", { name: /测试相册/ }).click();
 
   await page.getByRole("button", { name: "编辑相册信息" }).click();
@@ -118,7 +121,7 @@ test("an administrator signs in once and returns to the requested management pag
       return;
     }
     await route.fulfill({
-      json: { data: { authenticated, tokenConfigured: true, maxUploadMb: 10 } }
+      json: { data: { authenticated, tokenConfigured: true, maxUploadMb: 95 } }
     });
   });
 
@@ -137,4 +140,126 @@ test("authenticated upload page does not mix in image upload controls", async ({
   await expect(page.getByRole("heading", { name: "创建一个新的相册" })).toBeVisible();
   await expect(page.getByLabel("相册名称")).toBeVisible();
   await expect(page.getByRole("heading", { name: "上传图片", exact: true })).toHaveCount(0);
+});
+
+test("image upload reports progress and a successful result", async ({ page }) => {
+  await mockSession(page, true);
+  let images = [] as typeof image[];
+  await page.route("**/api/albums/album-1", (route) =>
+    route.fulfill({ json: { data: album } })
+  );
+  await page.route("**/api/albums/album-1/images", async (route) => {
+    if (route.request().method() === "POST") {
+      images = [image];
+      await route.fulfill({ json: { data: { image, duplicate: false } } });
+      return;
+    }
+    await route.fulfill({ json: { data: images } });
+  });
+  await page.route("**/api/albums/album-1/images/check", (route) =>
+    route.fulfill({ json: { data: { duplicateIds: [] } } })
+  );
+
+  await page.goto("/albums/album-1/upload");
+  await page.locator('input[type="file"]').setInputFiles({
+    buffer: Buffer.from("test-image"),
+    mimeType: "image/jpeg",
+    name: "test.jpg"
+  });
+
+  await expect(page.getByRole("status")).toContainText("1 张图片已上传");
+  await expect(page.getByLabel("全部图片上传进度")).toHaveJSProperty("value", 100);
+  await expect(page.getByText("test.jpg")).toBeVisible();
+  await expect(page.getByText(/已完成/)).toBeVisible();
+});
+
+test("image upload keeps server errors visible per item", async ({ page }) => {
+  await mockSession(page, true);
+  await page.route("**/api/albums/album-1", (route) =>
+    route.fulfill({ json: { data: album } })
+  );
+  await page.route("**/api/albums/album-1/images", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        json: { error: { code: "file_too_large", message: "图片超过上传大小限制" } },
+        status: 413
+      });
+      return;
+    }
+    await route.fulfill({ json: { data: [] } });
+  });
+  await page.route("**/api/albums/album-1/images/check", (route) =>
+    route.fulfill({ json: { data: { duplicateIds: [] } } })
+  );
+
+  await page.goto("/albums/album-1/upload");
+  await page.locator('input[type="file"]').setInputFiles({
+    buffer: Buffer.from("oversized-image"),
+    mimeType: "image/jpeg",
+    name: "large.jpg"
+  });
+
+  await expect(page.locator(".notice.error")).toContainText("1 张图片上传失败");
+  await expect(page.getByText("图片超过上传大小限制")).toBeVisible();
+  await expect(page.locator(".upload-file-item.error")).toContainText("上传失败");
+});
+
+test("existing duplicate images are skipped before file upload", async ({ page }) => {
+  await mockSession(page, true);
+  let uploadRequests = 0;
+  await page.route("**/api/albums/album-1", (route) =>
+    route.fulfill({ json: { data: album } })
+  );
+  await page.route("**/api/albums/album-1/images", async (route) => {
+    if (route.request().method() === "POST") {
+      uploadRequests += 1;
+    }
+    await route.fulfill({ json: { data: [] } });
+  });
+  await page.route("**/api/albums/album-1/images/check", async (route) => {
+    const input = route.request().postDataJSON() as { files: Array<{ clientId: string }> };
+    await route.fulfill({ json: { data: { duplicateIds: [input.files[0].clientId] } } });
+  });
+
+  await page.goto("/albums/album-1/upload");
+  await page.locator('input[type="file"]').setInputFiles({
+    buffer: Buffer.from("already-there"),
+    mimeType: "image/jpeg",
+    name: "existing.jpg"
+  });
+
+  await expect(page.getByRole("status")).toContainText("均已存在，已跳过上传");
+  await expect(page.locator(".upload-file-item.skipped")).toContainText("重复图片，已跳过");
+  expect(uploadRequests).toBe(0);
+});
+
+test("administrators create an album in a modal and enter it immediately", async ({ page }) => {
+  await mockSession(page, true);
+  const createdAlbum = {
+    ...album,
+    id: "album-2",
+    title: "新建的相册",
+    description: "新相册描述",
+    image_count: 0,
+    total_size_bytes: 0
+  };
+  await page.route("**/api/albums", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ json: { data: createdAlbum } });
+      return;
+    }
+    await route.fulfill({ json: { data: [album] } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "新建相册", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "新建相册" });
+  await dialog.getByLabel("相册名称").fill("新建的相册");
+  await dialog.getByLabel("相册描述").fill("新相册描述");
+  await dialog.getByRole("button", { name: "创建相册" }).click();
+
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("heading", { name: "新建的相册" })).toBeVisible();
+  await expect(page.locator("header").getByRole("link", { name: "上传图片" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
 });

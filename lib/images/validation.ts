@@ -9,8 +9,8 @@ export const ALLOWED_IMAGE_TYPES = new Set([
 ]);
 
 export function getMaxUploadBytes(env: CloudflareEnv): number {
-  const configuredMb = Number(env.GALLERY_MAX_UPLOAD_MB ?? "10");
-  const mb = Number.isFinite(configuredMb) && configuredMb > 0 ? configuredMb : 10;
+  const configuredMb = Number(env.GALLERY_MAX_UPLOAD_MB ?? "95");
+  const mb = Number.isFinite(configuredMb) && configuredMb > 0 ? configuredMb : 95;
   return Math.floor(mb * 1024 * 1024);
 }
 

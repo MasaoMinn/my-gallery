@@ -74,7 +74,29 @@ function readDirectToken(request: Request): string {
 
 export function requireRequestOrigin(request: Request): void {
   const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) {
+  if (!origin) {
     throw new HttpError(403, "请求来源无效", "invalid_origin");
   }
+
+  const requestUrl = new URL(request.url);
+  let originUrl: URL;
+  try {
+    originUrl = new URL(origin);
+  } catch {
+    throw new HttpError(403, "请求来源无效", "invalid_origin");
+  }
+  const exactOrigin = originUrl.origin === requestUrl.origin;
+  const localLoopbackOrigin =
+    isLoopbackHost(originUrl.hostname) &&
+    isLoopbackHost(requestUrl.hostname) &&
+    originUrl.protocol === requestUrl.protocol &&
+    originUrl.port === requestUrl.port;
+
+  if (!exactOrigin && !localLoopbackOrigin) {
+    throw new HttpError(403, "请求来源无效", "invalid_origin");
+  }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }

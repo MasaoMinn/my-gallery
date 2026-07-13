@@ -1,4 +1,10 @@
-import { createImage, getAlbum, listImages, toGalleryImage } from "@/lib/db/gallery";
+import {
+  createImage,
+  findDuplicateImage,
+  getAlbum,
+  listImages,
+  toGalleryImage
+} from "@/lib/db/gallery";
 import { getBindings } from "@/lib/cloudflare";
 import { assertUploadableImage } from "@/lib/images/validation";
 import { readImageDimensions } from "@/lib/images/dimensions";
@@ -51,6 +57,15 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     assertUploadableImage(file, env);
 
+    const duplicate = await findDuplicateImage(env.DB, albumId, {
+      filename: file.name,
+      sizeBytes: file.size,
+      contentType: file.type
+    });
+    if (duplicate) {
+      return ok({ image: toGalleryImage(duplicate), duplicate: true });
+    }
+
     const metadata = imageUploadMetadataSchema.parse({
       title: formData.get("title")?.toString() ?? "",
       description: formData.get("description")?.toString() ?? ""
@@ -84,7 +99,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         now
       });
 
-      return created(toGalleryImage(image));
+      return created({ image: toGalleryImage(image), duplicate: false });
     } catch (error) {
       await deleteImageObject(env.GALLERY_BUCKET, r2Key);
       throw error;

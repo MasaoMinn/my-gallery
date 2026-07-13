@@ -18,7 +18,7 @@ type AdminSessionContextValue = AdminSession & {
 const DEFAULT_SESSION: AdminSession = {
   authenticated: false,
   tokenConfigured: false,
-  maxUploadMb: 10
+  maxUploadMb: 95
 };
 
 const AdminSessionContext = createContext<AdminSessionContextValue | null>(null);

@@ -1,17 +1,50 @@
 "use client";
 
 import type { Album, GalleryImage } from "@/lib/db/gallery";
+import { imageIdentityKey } from "@/lib/images/identity";
 import {
   apiJson,
+  uploadFormData,
 } from "@/components/gallery-client";
-import { ArrowLeft, Folder, LoaderCircle, RefreshCw, Upload } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle2,
+  CircleMinus,
+  Clock3,
+  Folder,
+  LoaderCircle,
+  RefreshCw,
+  Upload
+} from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
 type Notice = {
   tone: "success" | "error" | "info";
   text: string;
 };
+
+type UploadItem = {
+  id: string;
+  filename: string;
+  size: number;
+  progress: number;
+  status: "queued" | "uploading" | "success" | "skipped" | "error";
+  error?: string;
+};
+
+type UploadEntry = {
+  file: File;
+  item: UploadItem;
+};
+
+type UploadApiResult = {
+  image: GalleryImage;
+  duplicate: boolean;
+};
+
+const UPLOAD_CONCURRENCY = 3;
 
 export function AlbumUploadManager({ albumId }: { albumId: string }) {
   const [album, setAlbum] = useState<Album | null>(null);
@@ -20,6 +53,20 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
+  const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
+
+  const totalProgress = useMemo(() => {
+    const totalBytes = uploadItems.reduce((total, item) => total + item.size, 0);
+    if (totalBytes === 0) {
+      return 0;
+    }
+
+    const uploadedBytes = uploadItems.reduce(
+      (total, item) => total + item.size * (item.progress / 100),
+      0
+    );
+    return Math.round((uploadedBytes / totalBytes) * 100);
+  }, [uploadItems]);
 
   function showError(error: unknown) {
     setNotice({
@@ -84,34 +131,154 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
       return;
     }
 
-    await mutate(async () => {
-      for (const file of files) {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("title", file.name.replace(/\.[^.]+$/, ""));
-        formData.append("description", uploadDescription);
+    const batchId = Date.now();
+    const seenKeys = new Set<string>();
+    const entries: UploadEntry[] = files.map((file, index) => {
+      const key = imageIdentityKey({
+        filename: file.name,
+        sizeBytes: file.size,
+        contentType: file.type
+      });
+      const duplicateInBatch = seenKeys.has(key);
+      seenKeys.add(key);
 
-        await apiJson<GalleryImage>(`/api/albums/${albumId}/images`, {
-          method: "POST",
-          body: formData
-        });
+      return {
+        file,
+        item: {
+          id: `${batchId}-${index}`,
+          filename: file.name,
+          size: file.size,
+          progress: duplicateInBatch ? 100 : 0,
+          status: duplicateInBatch ? "skipped" : "queued"
+        }
+      };
+    });
+    const items = entries.map((entry) => entry.item);
+    setUploadItems(items);
+    setNotice({ tone: "info", text: `正在检查 ${files.length} 张图片是否重复` });
+    setMutating(true);
+
+    let succeeded = 0;
+    let failed = 0;
+    let skipped = entries.filter((entry) => entry.item.status === "skipped").length;
+
+    try {
+      const candidates = entries.filter((entry) => entry.item.status === "queued");
+      if (candidates.length > 0) {
+        let duplicateIds: string[];
+        try {
+          const check = await apiJson<{ duplicateIds: string[] }>(
+            `/api/albums/${albumId}/images/check`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                files: candidates.map(({ file, item }) => ({
+                  clientId: item.id,
+                  filename: file.name,
+                  sizeBytes: file.size,
+                  contentType: file.type
+                }))
+              })
+            }
+          );
+          duplicateIds = check.duplicateIds;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "重复检查失败";
+          for (const { item } of candidates) {
+            updateUploadItem(item.id, { status: "error", error: message });
+          }
+          setNotice({ tone: "error", text: `无法检查重复图片：${message}` });
+          return;
+        }
+
+        const duplicateIdSet = new Set(duplicateIds);
+        for (const { item } of candidates) {
+          if (duplicateIdSet.has(item.id)) {
+            skipped += 1;
+            updateUploadItem(item.id, { progress: 100, status: "skipped" });
+          }
+        }
+
+        const uploadEntries = candidates.filter(({ item }) => !duplicateIdSet.has(item.id));
+        let nextIndex = 0;
+
+        async function uploadNext(): Promise<void> {
+          while (nextIndex < uploadEntries.length) {
+            const entry = uploadEntries[nextIndex];
+            nextIndex += 1;
+            await uploadEntry(entry);
+          }
+        }
+
+        async function uploadEntry({ file, item }: UploadEntry): Promise<void> {
+          updateUploadItem(item.id, { status: "uploading" });
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("title", file.name.replace(/\.[^.]+$/, ""));
+          formData.append("description", uploadDescription);
+
+          try {
+            const result = await uploadFormData<UploadApiResult>(
+              `/api/albums/${albumId}/images`,
+              formData,
+              (progress) => updateUploadItem(item.id, { progress })
+            );
+            if (result.duplicate) {
+              skipped += 1;
+              updateUploadItem(item.id, { progress: 100, status: "skipped" });
+            } else {
+              succeeded += 1;
+              updateUploadItem(item.id, { progress: 100, status: "success" });
+            }
+          } catch (error) {
+            failed += 1;
+            updateUploadItem(item.id, {
+              status: "error",
+              error: error instanceof Error ? error.message : "上传失败"
+            });
+          }
+        }
+
+        await Promise.all(
+          Array.from(
+            { length: Math.min(UPLOAD_CONCURRENCY, uploadEntries.length) },
+            () => uploadNext()
+          )
+        );
       }
 
-      await refreshAlbum();
-      setUploadDescription("");
-      setNotice({ tone: "success", text: `${files.length} 张图片已上传到「${album?.title ?? "当前相册"}」` });
-    });
-  }
+      if (succeeded > 0) {
+        await refreshAlbum();
+        setUploadDescription("");
+      }
 
-  async function mutate(action: () => Promise<void>) {
-    setMutating(true);
-    try {
-      await action();
-    } catch (error) {
-      showError(error);
+      if (failed === 0 && succeeded > 0) {
+        setNotice({
+          tone: "success",
+          text: skipped > 0
+            ? `${succeeded} 张上传成功，${skipped} 张重复图片已跳过`
+            : `${succeeded} 张图片已上传到「${album?.title ?? "当前相册"}」`
+        });
+      } else if (failed === 0) {
+        setNotice({ tone: "info", text: `${skipped} 张图片均已存在，已跳过上传` });
+      } else {
+        setNotice({
+          tone: "error",
+          text: succeeded === 0 && skipped === 0
+            ? `${failed} 张图片上传失败，请查看下方详情`
+            : `${succeeded} 张成功，${skipped} 张重复已跳过，${failed} 张失败，请查看详情`
+        });
+      }
     } finally {
       setMutating(false);
     }
+  }
+
+  function updateUploadItem(id: string, changes: Partial<UploadItem>) {
+    setUploadItems((current) =>
+      current.map((item) => (item.id === id ? { ...item, ...changes } : item))
+    );
   }
 
   return (
@@ -176,6 +343,41 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
               type="file"
             />
           </label>
+
+          {uploadItems.length > 0 ? (
+            <section className="upload-progress-panel" aria-live="polite">
+              <div className="upload-progress-heading">
+                <div>
+                  <strong>{mutating ? "正在上传" : "上传结果"}</strong>
+                  <span>{uploadItems.length} 张图片 · {totalProgress}%</span>
+                </div>
+                <progress aria-label="全部图片上传进度" max={100} value={totalProgress} />
+              </div>
+              <ol className="upload-file-list">
+                {uploadItems.map((item) => (
+                  <li className={`upload-file-item ${item.status}`} key={item.id}>
+                    <span className="upload-status-icon" aria-hidden="true">
+                      {item.status === "success" ? <CheckCircle2 size={18} /> : null}
+                      {item.status === "skipped" ? <CircleMinus size={18} /> : null}
+                      {item.status === "error" ? <AlertCircle size={18} /> : null}
+                      {item.status === "uploading" ? <LoaderCircle className="spin" size={18} /> : null}
+                      {item.status === "queued" ? <Clock3 size={18} /> : null}
+                    </span>
+                    <div>
+                      <strong>{item.filename}</strong>
+                      <span>{formatBytes(item.size)} · {formatUploadStatus(item)}</span>
+                      {item.error ? <p>{item.error}</p> : null}
+                    </div>
+                    <progress
+                      aria-label={`${item.filename} 上传进度`}
+                      max={100}
+                      value={item.progress}
+                    />
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
         </div>
 
         <div className="upload-card upload-wide">
@@ -209,4 +411,30 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
       </section>
     </main>
   );
+}
+
+function formatUploadStatus(item: UploadItem): string {
+  if (item.status === "success") {
+    return "已完成";
+  }
+  if (item.status === "error") {
+    return "上传失败";
+  }
+  if (item.status === "skipped") {
+    return "重复图片，已跳过";
+  }
+  if (item.status === "uploading") {
+    return `上传中 ${item.progress}%`;
+  }
+  return "等待上传";
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

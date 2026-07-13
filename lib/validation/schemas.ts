@@ -32,6 +32,17 @@ export const imageUploadMetadataSchema = z.object({
   description: z.string().trim().max(2_000, "图片描述过长").default("")
 });
 
+export const imageDuplicateCheckSchema = z.object({
+  files: z.array(
+    z.object({
+      clientId: z.string().min(1).max(100),
+      filename: z.string().min(1).max(512),
+      sizeBytes: z.number().int().nonnegative(),
+      contentType: z.string().min(1).max(200)
+    })
+  ).min(1)
+});
+
 export const adminLoginSchema = z.object({
   token: z.string().trim().min(1, "请输入管理员密钥").max(512, "管理员密钥过长")
 });
