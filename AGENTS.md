@@ -6,7 +6,7 @@ This workspace is for a web photo gallery application.
 
 The application must be built with Next.js and deployed to Cloudflare Workers. Image binary data must be stored in Cloudflare R2 object storage. Image and album metadata must be stored in Cloudflare D1, which is SQLite-compatible.
 
-The product must support uploading, browsing, creating, editing, and deleting albums and images. Every album and every image must have its own editable description text. Albums support public/private visibility: public albums are readable by anyone, while private albums require the shared private-album access key set from the album view.
+The product must support uploading, browsing, creating, editing, and deleting albums and images. Every album and every image must have its own editable description text. Public albums are readable by anyone; private albums and all mutations are available only to the authenticated administrator.
 
 The application should prioritize fast image loading and a responsive browsing experience.
 
@@ -20,7 +20,7 @@ The application should prioritize fast image loading and a responsive browsing e
   - View album detail.
   - Update album title/description and other metadata.
   - Update album public/private visibility.
-  - Manage the shared private-album access key from the album view.
+  - Restrict non-public albums to the authenticated administrator.
   - Delete album.
 - Support image CRUD:
   - Upload images into albums.
@@ -57,7 +57,8 @@ Suggested fields:
 - `id`: stable unique identifier.
 - `title`: album title.
 - `description`: album description text.
-- `is_public`: whether the album can be viewed without an access key.
+- `is_public`: whether the album can be viewed without administrator authentication.
+- `access_key`: retained only for database compatibility; do not use it for access control.
 - `cover_image_id`: optional image used as album cover.
 - `created_at`: creation timestamp.
 - `updated_at`: update timestamp.
@@ -114,12 +115,12 @@ Do not assume Next.js default image optimization works unchanged on Cloudflare W
   - Or block deletion until the album is empty.
 - Deleting an image must remove both D1 metadata and the R2 object, or record a recoverable cleanup task if one side fails.
 - Updating descriptions should be independent from replacing image files.
-- Image descriptions should appear on the gallery grid as semi-transparent hover overlays, and clicking an image should select it for editing in the right detail panel.
+- Image descriptions should appear on the gallery grid as semi-transparent hover overlays. Clicking opens a read-only large preview; authenticated administrators can explicitly enter edit mode below it.
 - Album and image list APIs should support stable ordering.
 
 ## Security And Validation
 
-Authentication and authorization are not yet specified. Do not assume the gallery is public-only or admin-only until confirmed.
+Use the signed, HttpOnly administrator session cookie for browser mutations. Visitors may only read public albums and images.
 
 At minimum, implementation should include:
 
@@ -184,9 +185,9 @@ These questions should be answered before or during implementation:
 Until clarified, assume:
 
 - The first version is a single-owner gallery/admin application.
-- Album and image browsing can be public only if explicitly requested.
+- Visitors can browse public albums only; private albums are administrator-only.
 - The user-facing UI should not show an administrator token field. Images are stored through the configured server-side R2 binding.
-- If `GALLERY_ADMIN_TOKEN` is configured later, add a non-user-facing admin flow before relying on protected write APIs.
+- `GALLERY_ADMIN_TOKEN` is required for all writes and must be stored as a Worker secret.
 - Image descriptions are plain text, not rich text.
 - The UI should be responsive and usable on desktop and mobile.
 - The implementation should start simple, then add advanced optimization once the core upload/browse flow works.

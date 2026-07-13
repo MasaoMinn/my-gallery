@@ -6,6 +6,17 @@ export type ApiEnvelope<T> = {
   };
 };
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export async function apiJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
 
@@ -15,7 +26,11 @@ export async function apiJson<T>(input: RequestInfo | URL, init?: RequestInit): 
 
   const payload = (await response.json()) as ApiEnvelope<T>;
   if (!response.ok) {
-    throw new Error(payload.error?.message ?? `请求失败: ${response.status}`);
+    throw new ApiError(
+      payload.error?.message ?? `请求失败: ${response.status}`,
+      response.status,
+      payload.error?.code ?? "request_error"
+    );
   }
 
   return payload.data as T;
@@ -27,21 +42,4 @@ export function createAdminHeaders(adminToken: string, extra?: HeadersInit): Hea
     headers.set("x-admin-token", adminToken.trim());
   }
   return headers;
-}
-
-export function createAlbumAccessHeaders(accessKey: string, extra?: HeadersInit): Headers {
-  const headers = new Headers(extra);
-  if (accessKey.trim()) {
-    headers.set("x-album-access-key", accessKey.trim());
-  }
-  return headers;
-}
-
-export function appendAlbumAccessKey(path: string, accessKey: string): string {
-  if (!accessKey.trim()) {
-    return path;
-  }
-
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}accessKey=${encodeURIComponent(accessKey.trim())}`;
 }

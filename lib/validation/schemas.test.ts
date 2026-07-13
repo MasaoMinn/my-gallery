@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   albumCreateSchema,
-  imageUpdateSchema,
-  privateAlbumAccessKeyUpdateSchema
+  imageUpdateSchema
 } from "@/lib/validation/schemas";
 
 describe("gallery schemas", () => {
@@ -14,10 +13,11 @@ describe("gallery schemas", () => {
     });
   });
 
-  it("requires a global private album access key value", () => {
-    expect(() => privateAlbumAccessKeyUpdateSchema.parse({ accessKey: " " })).toThrow(
-      "非公开相册密钥不能为空"
-    );
+  it("allows administrators to create a private album without a visitor key", () => {
+    expect(albumCreateSchema.parse({ title: "私密", isPublic: false })).toMatchObject({
+      title: "私密",
+      isPublic: false
+    });
   });
 
   it("requires at least one image update field", () => {

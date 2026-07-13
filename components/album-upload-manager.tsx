@@ -3,9 +3,6 @@
 import type { Album, GalleryImage } from "@/lib/db/gallery";
 import {
   apiJson,
-  appendAlbumAccessKey,
-  createAdminHeaders,
-  createAlbumAccessHeaders,
 } from "@/components/gallery-client";
 import { ArrowLeft, Folder, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 import Link from "next/link";
@@ -19,7 +16,6 @@ type Notice = {
 export function AlbumUploadManager({ albumId }: { albumId: string }) {
   const [album, setAlbum] = useState<Album | null>(null);
   const [recentImages, setRecentImages] = useState<GalleryImage[]>([]);
-  const [albumAccessKey, setAlbumAccessKey] = useState("");
   const [uploadDescription, setUploadDescription] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,12 +34,8 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
     async function loadAlbum() {
       try {
         const [loadedAlbum, images] = await Promise.all([
-          apiJson<Album>(`/api/albums/${albumId}`, {
-            headers: createAlbumAccessHeaders(albumAccessKey)
-          }),
-          apiJson<GalleryImage[]>(`/api/albums/${albumId}/images`, {
-            headers: createAlbumAccessHeaders(albumAccessKey)
-          })
+          apiJson<Album>(`/api/albums/${albumId}`),
+          apiJson<GalleryImage[]>(`/api/albums/${albumId}/images`)
         ]);
 
         if (cancelled) {
@@ -66,18 +58,14 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [albumAccessKey, albumId]);
+  }, [albumId]);
 
   async function refreshAlbum() {
     setLoading(true);
     try {
       const [loadedAlbum, images] = await Promise.all([
-        apiJson<Album>(`/api/albums/${albumId}`, {
-          headers: createAlbumAccessHeaders(albumAccessKey)
-        }),
-        apiJson<GalleryImage[]>(`/api/albums/${albumId}/images`, {
-          headers: createAlbumAccessHeaders(albumAccessKey)
-        })
+        apiJson<Album>(`/api/albums/${albumId}`),
+        apiJson<GalleryImage[]>(`/api/albums/${albumId}/images`)
       ]);
       setAlbum(loadedAlbum);
       setRecentImages(images.slice(0, 12));
@@ -105,7 +93,6 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
 
         await apiJson<GalleryImage>(`/api/albums/${albumId}/images`, {
           method: "POST",
-          headers: createAdminHeaders(""),
           body: formData
         });
       }
@@ -152,22 +139,6 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
       ) : null}
 
       <section className="upload-layout">
-        <div className="upload-card">
-          <div className="panel-heading">
-            <p className="section-label">访问</p>
-            <h2>非公开相册密钥</h2>
-          </div>
-          <label>
-            非公开相册密钥
-            <input
-              onChange={(event) => setAlbumAccessKey(event.target.value)}
-              placeholder="所有非公开相册共用，可选"
-              type="password"
-              value={albumAccessKey}
-            />
-          </label>
-        </div>
-
         <div className="upload-card">
           <div className="panel-heading">
             <p className="section-label">目标相册</p>
@@ -221,7 +192,7 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
                   <img
                     alt={image.description || "相册图片"}
                     loading="lazy"
-                    src={appendAlbumAccessKey(`/api/images/${image.id}/asset`, albumAccessKey)}
+                    src={`/api/images/${image.id}/asset`}
                   />
                   <figcaption>{image.description || "暂无图片描述"}</figcaption>
                 </figure>

@@ -32,12 +32,11 @@ export const imageUploadMetadataSchema = z.object({
   description: z.string().trim().max(2_000, "图片描述过长").default("")
 });
 
-export const privateAlbumAccessKeyUpdateSchema = z.object({
-  accessKey: z.string().trim().min(1, "非公开相册密钥不能为空").max(120, "非公开相册密钥过长")
+export const adminLoginSchema = z.object({
+  token: z.string().trim().min(1, "请输入管理员密钥").max(512, "管理员密钥过长")
 });
 
 export type AlbumCreateInput = z.infer<typeof albumCreateSchema>;
 export type AlbumUpdateInput = z.infer<typeof albumUpdateSchema>;
 export type ImageUpdateInput = z.infer<typeof imageUpdateSchema>;
 export type ImageUploadMetadataInput = z.infer<typeof imageUploadMetadataSchema>;
-export type PrivateAlbumAccessKeyUpdateInput = z.infer<typeof privateAlbumAccessKeyUpdateSchema>;

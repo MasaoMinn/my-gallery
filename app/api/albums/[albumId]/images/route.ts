@@ -1,8 +1,8 @@
-import { createImage, getAlbum, getPrivateAlbumAccessKey, listImages } from "@/lib/db/gallery";
+import { createImage, getAlbum, listImages, toGalleryImage } from "@/lib/db/gallery";
 import { getBindings } from "@/lib/cloudflare";
 import { assertUploadableImage } from "@/lib/images/validation";
 import { readImageDimensions } from "@/lib/images/dimensions";
-import { assertAlbumAccessKey, requireAdmin } from "@/lib/http/admin";
+import { requireAdmin, requireAlbumReadAccess } from "@/lib/http/admin";
 import { unwrapParams } from "@/lib/http/params";
 import { created, handleRouteError, HttpError, ok } from "@/lib/http/responses";
 import { createImageObjectKey, deleteImageObject, putImageObject } from "@/lib/r2/gallery-bucket";
@@ -24,9 +24,9 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       throw new HttpError(404, "相册不存在", "album_not_found");
     }
 
-    assertAlbumAccessKey(request, env, album, await getPrivateAlbumAccessKey(env.DB));
+    await requireAlbumReadAccess(request, env, album);
 
-    return ok(await listImages(env.DB, albumId));
+    return ok((await listImages(env.DB, albumId)).map(toGalleryImage));
   } catch (error) {
     return handleRouteError(error);
   }
@@ -36,7 +36,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   try {
     const { albumId } = await unwrapParams(context.params);
     const env = getBindings();
-    requireAdmin(request, env);
+    await requireAdmin(request, env);
 
     const album = await getAlbum(env.DB, albumId);
     if (!album) {
@@ -84,7 +84,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         now
       });
 
-      return created(image);
+      return created(toGalleryImage(image));
     } catch (error) {
       await deleteImageObject(env.GALLERY_BUCKET, r2Key);
       throw error;

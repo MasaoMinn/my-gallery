@@ -14,26 +14,30 @@ export type Album = {
 export type ImageSummary = {
   id: string;
   album_id: string;
-  r2_key: string;
-  filename: string;
   content_type: string;
   size_bytes: number;
   width: number | null;
   height: number | null;
-  title: string;
   description: string;
-  sort_order: number;
   created_at: string;
   updated_at: string;
 };
 
 export type GalleryImage = ImageSummary;
 
+export type StoredImage = ImageSummary & {
+  r2_key: string;
+  filename: string;
+  title: string;
+  sort_order: number;
+};
+
 type AlbumListRow = {
   id: string;
   title: string;
   description: string;
   is_public: number | string | null;
+  access_key: string | null;
   cover_image_id: string | null;
   created_at: string;
   updated_at: string;
@@ -54,7 +58,7 @@ type AlbumListRow = {
   cover_updated_at: string | null;
 };
 
-export async function listAlbums(db: D1Database): Promise<Album[]> {
+export async function listAlbums(db: D1Database, includePrivate = false): Promise<Album[]> {
   const result = await db
     .prepare(
       `
@@ -82,9 +86,11 @@ export async function listAlbums(db: D1Database): Promise<Album[]> {
         GROUP BY album_id
       ) stats ON stats.album_id = a.id
       LEFT JOIN images cover ON cover.id = a.cover_image_id
+      WHERE (? = 1 OR a.is_public = 1)
       ORDER BY a.updated_at DESC, a.created_at DESC, a.id ASC
       `
     )
+    .bind(includePrivate ? 1 : 0)
     .all<AlbumListRow>();
 
   return (result.results ?? []).map(toAlbum);
@@ -98,7 +104,7 @@ export async function createAlbum(
     .prepare(
       `
       INSERT INTO albums (id, title, description, is_public, access_key, created_at, updated_at)
-      VALUES (?, ?, ?, ?, '', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       `
     )
     .bind(
@@ -106,6 +112,7 @@ export async function createAlbum(
       input.title,
       input.description,
       input.isPublic ? 1 : 0,
+      "",
       input.now,
       input.now
     )
@@ -172,8 +179,6 @@ export async function updateAlbum(
     return null;
   }
 
-  const nextIsPublic = input.isPublic ?? current.is_public;
-
   await db
     .prepare(
       `
@@ -185,7 +190,7 @@ export async function updateAlbum(
     .bind(
       input.title ?? current.title,
       input.description ?? current.description,
-      nextIsPublic ? 1 : 0,
+      (input.isPublic ?? current.is_public) ? 1 : 0,
       input.coverImageId === undefined ? current.cover_image_id : input.coverImageId,
       input.now,
       albumId
@@ -199,7 +204,7 @@ export async function deleteAlbum(db: D1Database, albumId: string): Promise<void
   await db.prepare("DELETE FROM albums WHERE id = ?").bind(albumId).run();
 }
 
-export async function listImages(db: D1Database, albumId: string): Promise<GalleryImage[]> {
+export async function listImages(db: D1Database, albumId: string): Promise<StoredImage[]> {
   const result = await db
     .prepare(
       `
@@ -210,7 +215,7 @@ export async function listImages(db: D1Database, albumId: string): Promise<Galle
       `
     )
     .bind(albumId)
-    .all<GalleryImage>();
+    .all<StoredImage>();
 
   return (result.results ?? []).map(toImage);
 }
@@ -218,46 +223,18 @@ export async function listImages(db: D1Database, albumId: string): Promise<Galle
 export async function listAlbumImagesForDelete(
   db: D1Database,
   albumId: string
-): Promise<Array<Pick<GalleryImage, "id" | "r2_key">>> {
+): Promise<Array<Pick<StoredImage, "id" | "r2_key">>> {
   const result = await db
     .prepare("SELECT id, r2_key FROM images WHERE album_id = ?")
     .bind(albumId)
-    .all<Pick<GalleryImage, "id" | "r2_key">>();
+    .all<Pick<StoredImage, "id" | "r2_key">>();
 
   return result.results ?? [];
 }
 
-export async function getImage(db: D1Database, imageId: string): Promise<GalleryImage | null> {
-  const row = await db.prepare("SELECT * FROM images WHERE id = ?").bind(imageId).first<GalleryImage>();
+export async function getImage(db: D1Database, imageId: string): Promise<StoredImage | null> {
+  const row = await db.prepare("SELECT * FROM images WHERE id = ?").bind(imageId).first<StoredImage>();
   return row ? toImage(row) : null;
-}
-
-export async function getPrivateAlbumAccessKey(db: D1Database): Promise<string> {
-  await ensureSettingsTable(db);
-  const row = await db
-    .prepare("SELECT value FROM app_settings WHERE key = 'private_album_access_key'")
-    .first<{ value: string | null }>();
-
-  return row?.value ?? "";
-}
-
-export async function updatePrivateAlbumAccessKey(
-  db: D1Database,
-  input: { accessKey: string; now: string }
-): Promise<{ hasAccessKey: boolean }> {
-  await ensureSettingsTable(db);
-  await db
-    .prepare(
-      `
-      INSERT INTO app_settings (key, value, updated_at)
-      VALUES ('private_album_access_key', ?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-      `
-    )
-    .bind(input.accessKey, input.now)
-    .run();
-
-  return { hasAccessKey: Boolean(input.accessKey) };
 }
 
 export async function createImage(
@@ -275,7 +252,7 @@ export async function createImage(
     description: string;
     now: string;
   }
-): Promise<GalleryImage> {
+): Promise<StoredImage> {
   const maxSortRow = await db
     .prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM images WHERE album_id = ?")
     .bind(input.albumId)
@@ -332,7 +309,7 @@ export async function updateImage(
   db: D1Database,
   imageId: string,
   input: { title?: string; description?: string; sortOrder?: number; now: string }
-): Promise<GalleryImage | null> {
+): Promise<StoredImage | null> {
   const current = await getImage(db, imageId);
   if (!current) {
     return null;
@@ -390,6 +367,11 @@ export async function deleteImage(db: D1Database, imageId: string): Promise<void
       .prepare("UPDATE albums SET cover_image_id = ?, updated_at = ? WHERE id = ?")
       .bind(replacement?.id ?? null, new Date().toISOString(), current.album_id)
       .run();
+  } else {
+    await db
+      .prepare("UPDATE albums SET updated_at = ? WHERE id = ?")
+      .bind(new Date().toISOString(), current.album_id)
+      .run();
   }
 }
 
@@ -408,15 +390,11 @@ function toAlbum(row: AlbumListRow): Album {
       ? {
           id: row.cover_id,
           album_id: row.cover_album_id ?? row.id,
-          r2_key: row.cover_r2_key ?? "",
-          filename: row.cover_filename ?? "",
           content_type: row.cover_content_type ?? "application/octet-stream",
           size_bytes: toNumber(row.cover_size_bytes),
           width: toNullableNumber(row.cover_width),
           height: toNullableNumber(row.cover_height),
-          title: row.cover_title ?? "",
           description: row.cover_description ?? "",
-          sort_order: toNumber(row.cover_sort_order),
           created_at: row.cover_created_at ?? row.created_at,
           updated_at: row.cover_updated_at ?? row.updated_at
         }
@@ -424,13 +402,27 @@ function toAlbum(row: AlbumListRow): Album {
   };
 }
 
-function toImage(row: GalleryImage): GalleryImage {
+function toImage(row: StoredImage): StoredImage {
   return {
     ...row,
     size_bytes: toNumber(row.size_bytes),
     width: toNullableNumber(row.width),
     height: toNullableNumber(row.height),
     sort_order: toNumber(row.sort_order)
+  };
+}
+
+export function toGalleryImage(image: StoredImage): GalleryImage {
+  return {
+    id: image.id,
+    album_id: image.album_id,
+    content_type: image.content_type,
+    size_bytes: image.size_bytes,
+    width: image.width,
+    height: image.height,
+    description: image.description,
+    created_at: image.created_at,
+    updated_at: image.updated_at
   };
 }
 
@@ -444,27 +436,4 @@ function toNullableNumber(value: number | string | null | undefined): number | n
 
 function toBoolean(value: number | string | boolean | null | undefined): boolean {
   return value === true || value === 1 || value === "1";
-}
-
-async function ensureSettingsTable(db: D1Database): Promise<void> {
-  await db
-    .prepare(
-      `
-      CREATE TABLE IF NOT EXISTS app_settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL DEFAULT '',
-        updated_at TEXT NOT NULL
-      )
-      `
-    )
-    .run();
-
-  await db
-    .prepare(
-      `
-      INSERT OR IGNORE INTO app_settings (key, value, updated_at)
-      VALUES ('private_album_access_key', '', CURRENT_TIMESTAMP)
-      `
-    )
-    .run();
 }

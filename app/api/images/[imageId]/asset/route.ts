@@ -1,6 +1,6 @@
-import { getAlbum, getImage, getPrivateAlbumAccessKey } from "@/lib/db/gallery";
+import { getAlbum, getImage } from "@/lib/db/gallery";
 import { getBindings } from "@/lib/cloudflare";
-import { assertAlbumAccessKey } from "@/lib/http/admin";
+import { requireAlbumReadAccess } from "@/lib/http/admin";
 import { unwrapParams } from "@/lib/http/params";
 import { handleRouteError, HttpError } from "@/lib/http/responses";
 
@@ -23,7 +23,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     if (!album) {
       throw new HttpError(404, "相册不存在", "album_not_found");
     }
-    assertAlbumAccessKey(request, env, album, await getPrivateAlbumAccessKey(env.DB));
+    await requireAlbumReadAccess(request, env, album);
 
     const object = await env.GALLERY_BUCKET.get(image.r2_key);
     if (!object) {
@@ -40,7 +40,10 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       headers.set("content-language", metadata.contentLanguage);
     }
     headers.set("etag", object.httpEtag);
-    headers.set("cache-control", "public,max-age=31536000,immutable");
+    headers.set(
+      "cache-control",
+      album.is_public ? "public,max-age=31536000,immutable" : "private,no-store"
+    );
     headers.set("content-disposition", `inline; filename="${encodeURIComponent(image.filename)}"`);
     if (object.uploaded) {
       headers.set("last-modified", object.uploaded.toUTCString());

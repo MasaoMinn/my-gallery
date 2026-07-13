@@ -1,7 +1,7 @@
 "use client";
 
 import type { Album } from "@/lib/db/gallery";
-import { apiJson, createAdminHeaders } from "@/components/gallery-client";
+import { apiJson } from "@/components/gallery-client";
 import { ArrowLeft, LoaderCircle, Plus } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
@@ -34,12 +34,11 @@ export function CreateAlbumManager() {
       setNotice({ tone: "error", text: "请填写相册名称" });
       return;
     }
-
     setMutating(true);
     try {
       const album = await apiJson<Album>("/api/albums", {
         method: "POST",
-        headers: createAdminHeaders("", { "content-type": "application/json" }),
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(albumDraft)
       });
 
@@ -102,15 +101,16 @@ export function CreateAlbumManager() {
             <input
               checked={albumDraft.isPublic}
               onChange={(event) =>
-                setAlbumDraft((current) => ({ ...current, isPublic: event.target.checked }))
+                setAlbumDraft((current) => ({
+                  ...current,
+                  isPublic: event.target.checked
+                }))
               }
               type="checkbox"
             />
             公开相册
           </label>
-          {!albumDraft.isPublic ? (
-            <p className="empty-copy">非公开相册会使用相册视图中设置的全局访问密钥。</p>
-          ) : null}
+          {!albumDraft.isPublic ? <p className="empty-copy">非公开相册仅管理员登录后可见。</p> : null}
           <button className="primary-button" disabled={mutating} type="submit">
             {mutating ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <Plus aria-hidden="true" size={16} />}
             新建相册

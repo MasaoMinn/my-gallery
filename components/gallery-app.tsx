@@ -2,23 +2,33 @@
 
 import type { Album, GalleryImage } from "@/lib/db/gallery";
 import {
-  apiJson,
-  appendAlbumAccessKey,
-  createAdminHeaders,
-  createAlbumAccessHeaders
+  sortAlbums,
+  type AlbumSortField,
+  type SortDirection
+} from "@/lib/albums/sort";
+import {
+  ApiError,
+  apiJson
 } from "@/components/gallery-client";
+import { useAdminSession } from "@/components/admin-session";
 import {
   Folder,
   Globe2,
   ImageIcon,
   LoaderCircle,
+  LogIn,
+  LogOut,
   Lock,
+  Pencil,
   RefreshCw,
   Save,
   Search,
   ArrowLeft,
+  ArrowDown,
+  ArrowUp,
   Trash2,
-  Upload
+  Upload,
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -29,21 +39,22 @@ type Notice = {
 };
 
 export function GalleryApp() {
+  const { authenticated, loading: loadingAdmin, logout } = useAdminSession();
   const [albums, setAlbums] = useState<Album[]>([]);
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState("");
   const [selectedImageId, setSelectedImageId] = useState("");
-  const [suppressedOverlayImageId, setSuppressedOverlayImageId] = useState("");
-  const [privateAlbumAccessKey, setPrivateAlbumAccessKey] = useState("");
-  const [privateAlbumAccessKeyDraft, setPrivateAlbumAccessKeyDraft] = useState("");
-  const [hasPrivateAlbumAccessKey, setHasPrivateAlbumAccessKey] = useState(false);
+  const [albumEditOpen, setAlbumEditOpen] = useState(false);
+  const [imageEditing, setImageEditing] = useState(false);
   const [albumEdit, setAlbumEdit] = useState({
     title: "",
     description: "",
     isPublic: true
   });
-  const [imageEdit, setImageEdit] = useState({ title: "", description: "" });
+  const [imageEdit, setImageEdit] = useState({ description: "" });
   const [query, setQuery] = useState("");
+  const [albumSortField, setAlbumSortField] = useState<AlbumSortField>("updatedAt");
+  const [albumSortDirection, setAlbumSortDirection] = useState<SortDirection>("desc");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [loadingAlbums, setLoadingAlbums] = useState(true);
   const [loadingImages, setLoadingImages] = useState(false);
@@ -59,18 +70,16 @@ export function GalleryApp() {
     [images, selectedImageId]
   );
 
-  const filteredAlbums = useMemo(() => {
+  const visibleAlbums = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) {
-      return albums;
-    }
-
-    return albums.filter(
+    const matchingAlbums = normalized ? albums.filter(
       (album) =>
         album.title.toLowerCase().includes(normalized) ||
         album.description.toLowerCase().includes(normalized)
-    );
-  }, [albums, query]);
+    ) : albums;
+
+    return sortAlbums(matchingAlbums, albumSortField, albumSortDirection);
+  }, [albums, albumSortDirection, albumSortField, query]);
 
   function showError(error: unknown) {
     setNotice({
@@ -80,20 +89,23 @@ export function GalleryApp() {
   }
 
   useEffect(() => {
+    if (loadingAdmin) {
+      return;
+    }
+
     let cancelled = false;
 
     async function loadInitialAlbums() {
       try {
-        const [loadedAlbums, accessKeySetting] = await Promise.all([
-          apiJson<Album[]>("/api/albums"),
-          apiJson<{ hasAccessKey: boolean }>("/api/settings/private-album-access-key")
-        ]);
+        const loadedAlbums = await apiJson<Album[]>("/api/albums");
         if (cancelled) {
           return;
         }
 
         setAlbums(loadedAlbums);
-        setHasPrivateAlbumAccessKey(accessKeySetting.hasAccessKey);
+        setSelectedAlbumId("");
+        setSelectedImageId("");
+        setImages([]);
       } catch (error) {
         showError(error);
       } finally {
@@ -108,7 +120,7 @@ export function GalleryApp() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authenticated, loadingAdmin]);
 
   async function refreshAlbums(preferredAlbumId = selectedAlbumId) {
     setLoadingAlbums(true);
@@ -124,7 +136,7 @@ export function GalleryApp() {
         setSelectedAlbumId("");
         setSelectedImageId("");
         setAlbumEdit({ title: "", description: "", isPublic: true });
-        setImageEdit({ title: "", description: "" });
+        setImageEdit({ description: "" });
         setImages([]);
       }
     } catch (error) {
@@ -134,16 +146,14 @@ export function GalleryApp() {
     }
   }
 
-  async function refreshImages(albumId = selectedAlbumId, accessKey = privateAlbumAccessKey) {
+  async function refreshImages(albumId = selectedAlbumId) {
     if (!albumId) {
       return;
     }
 
     setLoadingImages(true);
     try {
-      const loadedImages = await apiJson<GalleryImage[]>(`/api/albums/${albumId}/images`, {
-        headers: createAlbumAccessHeaders(accessKey)
-      });
+      const loadedImages = await apiJson<GalleryImage[]>(`/api/albums/${albumId}/images`);
       setImages(loadedImages);
       applyImageSelection(null);
     } catch (error) {
@@ -154,20 +164,16 @@ export function GalleryApp() {
   }
 
   function selectAlbum(album: Album) {
-    const accessKey = readAlbumAccessForSelection(album);
-    if (accessKey === null) {
-      return;
-    }
-
     applyAlbumSelection(album);
     setImages([]);
     applyImageSelection(null);
-    void refreshImages(album.id, accessKey);
+    void refreshImages(album.id);
   }
 
   function returnToAlbums() {
     setSelectedAlbumId("");
     setImages([]);
+    setAlbumEditOpen(false);
     setAlbumEdit({ title: "", description: "", isPublic: true });
     applyImageSelection(null);
   }
@@ -181,47 +187,21 @@ export function GalleryApp() {
     });
   }
 
-  function readAlbumAccessForSelection(album: Album): string | null {
-    if (album.is_public) {
-      return "";
-    }
-
-    if (privateAlbumAccessKey) {
-      return privateAlbumAccessKey;
-    }
-
-    const accessKey = window.prompt("请输入非公开相册密钥");
-    if (!accessKey?.trim()) {
-      return null;
-    }
-
-    const normalizedAccessKey = accessKey.trim();
-    setPrivateAlbumAccessKey(normalizedAccessKey);
-    setPrivateAlbumAccessKeyDraft(normalizedAccessKey);
-    return normalizedAccessKey;
-  }
-
-  function selectedAlbumAccessKey(): string {
-    return selectedAlbum?.is_public ? "" : privateAlbumAccessKey;
-  }
-
   function applyImageSelection(image: GalleryImage | null) {
-    setSuppressedOverlayImageId("");
     setSelectedImageId(image?.id ?? "");
-    setImageEdit({
-      title: image?.title ?? "",
-      description: image?.description ?? ""
-    });
+    setImageEdit({ description: image?.description ?? "" });
+    setImageEditing(false);
   }
 
-  function toggleImageSelection(image: GalleryImage) {
-    if (image.id === selectedImageId) {
-      applyImageSelection(null);
-      setSuppressedOverlayImageId(image.id);
-      return;
-    }
-
+  function openImage(image: GalleryImage) {
     applyImageSelection(image);
+  }
+
+  function closeAlbumEdit() {
+    if (selectedAlbum) {
+      applyAlbumSelection(selectedAlbum);
+    }
+    setAlbumEditOpen(false);
   }
 
   async function saveAlbum(event: FormEvent<HTMLFormElement>) {
@@ -229,37 +209,23 @@ export function GalleryApp() {
     if (!selectedAlbum) {
       return;
     }
-
     await mutate(async () => {
+      const payload = {
+        title: albumEdit.title,
+        description: albumEdit.description,
+        isPublic: albumEdit.isPublic
+      };
+
       const album = await apiJson<Album>(`/api/albums/${selectedAlbum.id}`, {
         method: "PATCH",
-        headers: createAdminHeaders("", { "content-type": "application/json" }),
-        body: JSON.stringify({
-          title: albumEdit.title,
-          description: albumEdit.description,
-          isPublic: albumEdit.isPublic
-        })
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
       });
 
       setAlbums((current) => current.map((item) => (item.id === album.id ? album : item)));
       applyAlbumSelection(album);
+      setAlbumEditOpen(false);
       setNotice({ tone: "success", text: "相册信息已保存" });
-    });
-  }
-
-  async function savePrivateAlbumAccessKey(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    await mutate(async () => {
-      const setting = await apiJson<{ hasAccessKey: boolean }>("/api/settings/private-album-access-key", {
-        method: "PATCH",
-        headers: createAdminHeaders("", { "content-type": "application/json" }),
-        body: JSON.stringify({ accessKey: privateAlbumAccessKeyDraft })
-      });
-
-      setHasPrivateAlbumAccessKey(setting.hasAccessKey);
-      setPrivateAlbumAccessKey(privateAlbumAccessKeyDraft.trim());
-      setNotice({ tone: "success", text: "非公开相册密钥已保存" });
     });
   }
 
@@ -270,19 +236,19 @@ export function GalleryApp() {
 
     await mutate(async () => {
       await apiJson<void>(`/api/albums/${selectedAlbum.id}`, {
-        method: "DELETE",
-        headers: createAdminHeaders("")
+        method: "DELETE"
       });
 
       const remaining = albums.filter((album) => album.id !== selectedAlbum.id);
       setAlbums(remaining);
+      setAlbumEditOpen(false);
       if (remaining[0]) {
         selectAlbum(remaining[0]);
       } else {
         setSelectedAlbumId("");
         setSelectedImageId("");
         setAlbumEdit({ title: "", description: "", isPublic: true });
-        setImageEdit({ title: "", description: "" });
+        setImageEdit({ description: "" });
         setImages([]);
       }
       setNotice({ tone: "success", text: "相册和图片已删除" });
@@ -298,12 +264,12 @@ export function GalleryApp() {
     await mutate(async () => {
       const image = await apiJson<GalleryImage>(`/api/images/${selectedImage.id}`, {
         method: "PATCH",
-        headers: createAdminHeaders("", { "content-type": "application/json" }),
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(imageEdit)
       });
 
       setImages((current) => current.map((item) => (item.id === image.id ? image : item)));
-      applyImageSelection(image);
+      applyImageSelection(null);
       setNotice({ tone: "success", text: "图片描述已保存" });
     });
   }
@@ -315,8 +281,7 @@ export function GalleryApp() {
 
     await mutate(async () => {
       await apiJson<void>(`/api/images/${selectedImage.id}`, {
-        method: "DELETE",
-        headers: createAdminHeaders("")
+        method: "DELETE"
       });
 
       const remaining = images.filter((image) => image.id !== selectedImage.id);
@@ -332,10 +297,20 @@ export function GalleryApp() {
     try {
       await action();
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        window.location.assign(`/admin/login?next=${encodeURIComponent(window.location.pathname)}`);
+        return;
+      }
       showError(error);
     } finally {
       setMutating(false);
     }
+  }
+
+  async function signOut() {
+    await logout();
+    returnToAlbums();
+    setNotice({ tone: "success", text: "已退出管理员会话" });
   }
 
   return (
@@ -359,7 +334,20 @@ export function GalleryApp() {
               </button>
             ) : null}
             <p className="section-label">{selectedAlbum ? "图片" : "相册"}</p>
-            <h2>{selectedAlbum?.title ?? "相册"}</h2>
+            <div className="album-title-row">
+              <h2>{selectedAlbum?.title ?? "相册"}</h2>
+              {selectedAlbum && authenticated ? (
+                <button
+                  aria-label="编辑相册信息"
+                  className="secondary-button compact-button"
+                  onClick={() => setAlbumEditOpen(true)}
+                  type="button"
+                >
+                  <Pencil aria-hidden="true" size={15} />
+                  编辑相册
+                </button>
+              ) : null}
+            </div>
             <span>
               {selectedAlbum
                 ? `${selectedAlbum.image_count} 张图片 · ${formatBytes(selectedAlbum.total_size_bytes)}`
@@ -369,31 +357,75 @@ export function GalleryApp() {
 
           <div className="toolbar">
             {!selectedAlbum ? (
-              <label className="search-box toolbar-search">
-                <Search aria-hidden="true" size={17} />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索相册"
-                  type="search"
-                />
-              </label>
+              <>
+                <label className="search-box toolbar-search">
+                  <Search aria-hidden="true" size={17} />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="搜索相册"
+                    type="search"
+                  />
+                </label>
+                <label className="sort-control">
+                  <span>排序</span>
+                  <select
+                    aria-label="相册排序字段"
+                    onChange={(event) => setAlbumSortField(event.target.value as AlbumSortField)}
+                    value={albumSortField}
+                  >
+                    <option value="title">相册名字</option>
+                    <option value="createdAt">创建时间</option>
+                    <option value="updatedAt">更改时间</option>
+                    <option value="size">相册大小</option>
+                  </select>
+                </label>
+                <button
+                  aria-label={albumSortDirection === "asc" ? "当前升序，切换为降序" : "当前降序，切换为升序"}
+                  className="secondary-button sort-direction"
+                  onClick={() =>
+                    setAlbumSortDirection((current) => (current === "asc" ? "desc" : "asc"))
+                  }
+                  title={albumSortDirection === "asc" ? "升序" : "降序"}
+                  type="button"
+                >
+                  {albumSortDirection === "asc" ? (
+                    <ArrowUp aria-hidden="true" size={16} />
+                  ) : (
+                    <ArrowDown aria-hidden="true" size={16} />
+                  )}
+                  {albumSortDirection === "asc" ? "升序" : "降序"}
+                </button>
+              </>
             ) : null}
             <button className="secondary-button" onClick={() => void refreshAlbums()} type="button">
               <RefreshCw aria-hidden="true" size={16} />
               刷新
             </button>
-            {selectedAlbum ? (
-              <Link className="primary-button" href={`/albums/${selectedAlbum.id}/upload`}>
-                <Upload aria-hidden="true" size={17} />
-                上传图片
+            {authenticated ? (
+              <>
+                {selectedAlbum ? (
+                  <Link className="primary-button" href={`/albums/${selectedAlbum.id}/upload`}>
+                    <Upload aria-hidden="true" size={17} />
+                    上传图片
+                  </Link>
+                ) : (
+                  <Link className="primary-button" href="/upload">
+                    <Folder aria-hidden="true" size={17} />
+                    新建相册
+                  </Link>
+                )}
+                <button className="secondary-button" onClick={() => void signOut()} type="button">
+                  <LogOut aria-hidden="true" size={16} />
+                  退出管理
+                </button>
+              </>
+            ) : !loadingAdmin ? (
+              <Link className="secondary-button" href="/admin/login">
+                <LogIn aria-hidden="true" size={16} />
+                管理员登录
               </Link>
-            ) : (
-              <Link className="primary-button" href="/upload">
-                <Folder aria-hidden="true" size={17} />
-                新建相册
-              </Link>
-            )}
+            ) : null}
           </div>
         </header>
 
@@ -404,33 +436,11 @@ export function GalleryApp() {
         ) : null}
 
         {!selectedAlbum ? (
-          <form className="album-key-panel" onSubmit={savePrivateAlbumAccessKey}>
-            <div>
-              <p className="section-label">非公开相册</p>
-              <h3>访问密钥</h3>
-              <span>{hasPrivateAlbumAccessKey ? "已设置。更新后所有非公开相册使用新密钥。" : "尚未设置。非公开相册需要这个密钥才能访问。"}</span>
-            </div>
-            <label>
-              密钥
-              <input
-                onChange={(event) => setPrivateAlbumAccessKeyDraft(event.target.value)}
-                placeholder="设置所有非公开相册共用的访问密钥"
-                type="password"
-                value={privateAlbumAccessKeyDraft}
-              />
-            </label>
-            <button className="secondary-button" disabled={mutating} type="submit">
-              {hasPrivateAlbumAccessKey ? "更新密钥" : "设置密钥"}
-            </button>
-          </form>
-        ) : null}
-
-        {!selectedAlbum ? (
           <div className="album-gallery" aria-busy={loadingAlbums}>
             {loadingAlbums ? (
               Array.from({ length: 6 }).map((_, index) => <div className="album-card skeleton-card" key={index} />)
-            ) : filteredAlbums.length > 0 ? (
-              filteredAlbums.map((album) => (
+            ) : visibleAlbums.length > 0 ? (
+              visibleAlbums.map((album) => (
                 <button className="album-card" key={album.id} onClick={() => selectAlbum(album)} type="button">
                   <span className="album-cover">
                     {album.cover_image ? (
@@ -458,11 +468,9 @@ export function GalleryApp() {
             ) : (
               <div className="empty-gallery">
                 <Folder aria-hidden="true" size={34} />
-                <h3>创建第一个相册</h3>
-                <p>请先新建相册。创建完成后回到相册视图，点开相册即可浏览和上传图片。</p>
-                <Link className="primary-button" href="/upload">
-                  新建相册
-                </Link>
+                <h3>{authenticated ? "创建第一个相册" : "暂无公开相册"}</h3>
+                <p>{authenticated ? "新建相册后即可上传和管理图片。" : "管理员发布公开相册后会显示在这里。"}</p>
+                {authenticated ? <Link className="primary-button" href="/upload">新建相册</Link> : null}
               </div>
             )}
           </div>
@@ -473,25 +481,18 @@ export function GalleryApp() {
             ) : images.length > 0 ? (
               images.map((image) => (
                 <button
-                  className={`image-card ${image.id === selectedImageId ? "selected" : ""} ${
-                    image.id === suppressedOverlayImageId ? "suppress-overlay" : ""
-                  }`}
+                  className="image-card"
                   key={image.id}
-                  onClick={() => toggleImageSelection(image)}
-                  onMouseLeave={() => {
-                    if (image.id === suppressedOverlayImageId) {
-                      setSuppressedOverlayImageId("");
-                    }
-                  }}
+                  onClick={() => openImage(image)}
                   style={{ aspectRatio: getAspectRatio(image) }}
                   type="button"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    alt={image.description || image.title || "相册图片"}
+                    alt={image.description || "相册图片"}
                     height={image.height ?? undefined}
                     loading="lazy"
-                    src={appendAlbumAccessKey(`/api/images/${image.id}/asset`, selectedAlbumAccessKey())}
+                    src={`/api/images/${image.id}/asset`}
                     width={image.width ?? undefined}
                   />
                   <span className="image-overlay">
@@ -504,27 +505,40 @@ export function GalleryApp() {
               <div className="empty-gallery">
                 <ImageIcon aria-hidden="true" size={34} />
                 <h3>最近上传</h3>
-                <p>这个相册还没有图片。只有打开相册后才能上传，浏览页会按稳定比例网格展示。</p>
-                <Link className="primary-button" href={`/albums/${selectedAlbum.id}/upload`}>
-                  上传图片
-                </Link>
+                <p>{authenticated ? "这个相册还没有图片，可以从当前相册上传。" : "这个相册目前没有公开图片。"}</p>
+                {authenticated ? (
+                  <Link className="primary-button" href={`/albums/${selectedAlbum.id}/upload`}>
+                    上传图片
+                  </Link>
+                ) : null}
               </div>
             )}
           </div>
         )}
       </section>
 
-      {selectedAlbum ? (
-      <aside className="detail-panel" aria-label="描述编辑">
-        <form onSubmit={saveAlbum}>
-          <div className="panel-heading">
-            <p className="section-label">描述</p>
-            <h2>相册信息</h2>
-          </div>
+      {selectedAlbum && authenticated && albumEditOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <form
+            aria-labelledby="album-edit-title"
+            aria-modal="true"
+            className="edit-dialog"
+            onSubmit={saveAlbum}
+            role="dialog"
+          >
+            <div className="dialog-heading">
+              <div className="panel-heading">
+                <p className="section-label">相册</p>
+                <h2 id="album-edit-title">编辑相册信息</h2>
+              </div>
+              <button aria-label="关闭相册编辑" className="icon-button" onClick={closeAlbumEdit} type="button">
+                <X aria-hidden="true" size={19} />
+              </button>
+            </div>
           <label>
             名称
             <input
-              disabled={!selectedAlbum}
+              autoFocus
               onChange={(event) => setAlbumEdit((current) => ({ ...current, title: event.target.value }))}
               value={albumEdit.title}
             />
@@ -532,7 +546,6 @@ export function GalleryApp() {
           <label>
             描述
             <textarea
-              disabled={!selectedAlbum}
               onChange={(event) =>
                 setAlbumEdit((current) => ({ ...current, description: event.target.value }))
               }
@@ -543,7 +556,6 @@ export function GalleryApp() {
           <label className="check-row">
             <input
               checked={albumEdit.isPublic}
-              disabled={!selectedAlbum}
               onChange={(event) =>
                 setAlbumEdit((current) => ({ ...current, isPublic: event.target.checked }))
               }
@@ -551,52 +563,111 @@ export function GalleryApp() {
             />
             公开相册
           </label>
+          {!albumEdit.isPublic ? <p className="empty-copy">非公开相册仅管理员登录后可见。</p> : null}
           <div className="button-row">
-            <button className="secondary-button danger" disabled={!selectedAlbum || mutating} onClick={removeAlbum} type="button">
+            <button className="secondary-button danger" disabled={mutating} onClick={removeAlbum} type="button">
               <Trash2 aria-hidden="true" size={16} />
               删除
             </button>
-            <button className="primary-button" disabled={!selectedAlbum || mutating} type="submit">
+            <button className="primary-button" disabled={mutating} type="submit">
               {mutating ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <Save aria-hidden="true" size={16} />}
               保存
             </button>
           </div>
         </form>
+        </div>
+      ) : null}
 
-        <form className="image-detail" onSubmit={saveImage}>
-          <div className="panel-heading">
-            <p className="section-label">图片</p>
-            <h2>{selectedImage ? "图片描述" : "选择图片"}</h2>
-          </div>
-
-          {selectedImage ? (
-            <>
-              <label>
-                描述
-                <textarea
-                  onChange={(event) =>
-                    setImageEdit((current) => ({ ...current, description: event.target.value }))
-                  }
-                  rows={5}
-                  value={imageEdit.description}
-                />
-              </label>
-              <div className="button-row">
-                <button className="secondary-button danger" disabled={mutating} onClick={removeImage} type="button">
-                  <Trash2 aria-hidden="true" size={16} />
-                  删除
-                </button>
-                <button className="primary-button" disabled={mutating} type="submit">
-                  {mutating ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <Save aria-hidden="true" size={16} />}
-                  保存
-                </button>
+      {selectedImage ? (
+        <div className="modal-backdrop image-modal-backdrop" role="presentation">
+          <form
+            aria-labelledby="image-edit-title"
+            aria-modal="true"
+            className="image-dialog"
+            onSubmit={saveImage}
+            role="dialog"
+          >
+            <div className="dialog-heading image-dialog-heading">
+              <div className="panel-heading">
+                <p className="section-label">图片</p>
+                <h2 id="image-edit-title">查看图片</h2>
               </div>
-            </>
-          ) : (
-            <p className="empty-copy">在中间网格选择一张图片后编辑描述。</p>
-          )}
-        </form>
-      </aside>
+              <button
+                aria-label="关闭图片预览"
+                className="icon-button"
+                onClick={() => applyImageSelection(null)}
+                type="button"
+              >
+                <X aria-hidden="true" size={20} />
+              </button>
+            </div>
+            <div className="enlarged-image-frame">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                alt={selectedImage.description || "相册图片"}
+                height={selectedImage.height ?? undefined}
+                src={`/api/images/${selectedImage.id}/asset`}
+                width={selectedImage.width ?? undefined}
+              />
+            </div>
+            <div className="image-dialog-editor">
+              <div className="description-heading">
+                <strong>图片描述</strong>
+                {authenticated && !imageEditing ? (
+                  <button className="secondary-button compact-button" onClick={() => setImageEditing(true)} type="button">
+                    <Pencil aria-hidden="true" size={15} />
+                    编辑
+                  </button>
+                ) : null}
+              </div>
+              {imageEditing ? (
+                <>
+                  <label>
+                    描述
+                    <textarea
+                      autoFocus
+                      onChange={(event) =>
+                        setImageEdit((current) => ({ ...current, description: event.target.value }))
+                      }
+                      rows={4}
+                      value={imageEdit.description}
+                    />
+                  </label>
+                  <div className="button-row">
+                    <button className="secondary-button danger" disabled={mutating} onClick={removeImage} type="button">
+                      <Trash2 aria-hidden="true" size={16} />
+                      删除
+                    </button>
+                    <button
+                      className="secondary-button"
+                      disabled={mutating}
+                      onClick={() => {
+                        setImageEdit({ description: selectedImage.description });
+                        setImageEditing(false);
+                      }}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                    <button className="primary-button" disabled={mutating} type="submit">
+                      {mutating ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <Save aria-hidden="true" size={16} />}
+                      保存
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="image-description">{selectedImage.description || "暂无图片描述"}</p>
+              )}
+              <dl className="image-metadata">
+                <div><dt>文件大小</dt><dd>{formatBytes(selectedImage.size_bytes)}</dd></div>
+                <div><dt>图片尺寸</dt><dd>{formatDimensions(selectedImage)}</dd></div>
+                <div><dt>图片类型</dt><dd>{formatContentType(selectedImage.content_type)}</dd></div>
+                <div><dt>上传时间</dt><dd>{formatDate(selectedImage.created_at)}</dd></div>
+                <div><dt>最后更改</dt><dd>{formatDate(selectedImage.updated_at)}</dd></div>
+              </dl>
+            </div>
+          </form>
+        </div>
       ) : null}
     </main>
   );
@@ -620,4 +691,19 @@ function formatBytes(bytes: number): string {
   }
 
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDimensions(image: GalleryImage): string {
+  return image.width && image.height ? `${image.width} × ${image.height} px` : "未知";
+}
+
+function formatContentType(contentType: string): string {
+  return contentType.startsWith("image/") ? contentType.slice("image/".length).toUpperCase() : contentType;
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
 }

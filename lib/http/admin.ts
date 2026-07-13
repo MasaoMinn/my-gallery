@@ -1,80 +1,80 @@
-import { HttpError } from "@/lib/http/responses";
 import type { Album } from "@/lib/db/gallery";
+import {
+  ADMIN_SESSION_COOKIE,
+  readCookie,
+  verifyAdminSession,
+  verifyAdminToken
+} from "@/lib/auth/admin-session";
+import { HttpError } from "@/lib/http/responses";
 
-export function readRequestToken(request: Request): string {
+export function configuredAdminToken(env: CloudflareEnv): string {
+  const token = env.GALLERY_ADMIN_TOKEN?.trim() ?? "";
+  if (!token) {
+    throw new HttpError(
+      503,
+      "管理员密钥尚未配置，写操作已关闭",
+      "admin_token_not_configured"
+    );
+  }
+  return token;
+}
+
+export async function requireAdmin(request: Request, env: CloudflareEnv): Promise<void> {
+  const configuredToken = configuredAdminToken(env);
+  const directToken = readDirectToken(request);
+
+  if (directToken && (await verifyAdminToken(directToken, configuredToken))) {
+    return;
+  }
+
+  const session = readCookie(request, ADMIN_SESSION_COOKIE);
+  if (session && (await verifyAdminSession(session, configuredToken))) {
+    requireRequestOrigin(request);
+    return;
+  }
+
+  throw new HttpError(401, "管理员会话无效或已过期", "unauthorized");
+}
+
+export async function isAdminRequest(request: Request, env: CloudflareEnv): Promise<boolean> {
+  const configuredToken = env.GALLERY_ADMIN_TOKEN?.trim() ?? "";
+  if (!configuredToken) {
+    return false;
+  }
+
+  const directToken = readDirectToken(request);
+  if (directToken && (await verifyAdminToken(directToken, configuredToken))) {
+    return true;
+  }
+
+  const session = readCookie(request, ADMIN_SESSION_COOKIE);
+  return Boolean(session && (await verifyAdminSession(session, configuredToken)));
+}
+
+export async function requireAlbumReadAccess(
+  request: Request,
+  env: CloudflareEnv,
+  album: Album
+): Promise<void> {
+  if (album.is_public || (await isAdminRequest(request, env))) {
+    return;
+  }
+
+  throw new HttpError(404, "相册不存在", "album_not_found");
+}
+
+function readDirectToken(request: Request): string {
   const auth = request.headers.get("authorization");
   if (auth?.toLowerCase().startsWith("bearer ")) {
     return auth.slice("bearer ".length).trim();
   }
 
-  const headerToken = request.headers.get("x-admin-token");
-  if (headerToken) {
-    return headerToken.trim();
-  }
-
-  const cookie = request.headers.get("cookie");
-  const cookieToken = cookie
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("gallery_admin_token="))
-    ?.slice("gallery_admin_token=".length);
-
-  return cookieToken ? decodeURIComponent(cookieToken) : "";
+  return request.headers.get("x-admin-token")?.trim() ?? "";
 }
 
-export function requireAdmin(request: Request, env: CloudflareEnv): void {
-  const configuredToken = env.GALLERY_ADMIN_TOKEN?.trim();
-
-  if (!configuredToken) {
-    return;
-  }
-
-  if (readRequestToken(request) !== configuredToken) {
-    throw new HttpError(401, "管理员令牌无效或缺失", "unauthorized");
-  }
-}
-
-export function isAdminRequest(request: Request, env: CloudflareEnv): boolean {
-  const configuredToken = env.GALLERY_ADMIN_TOKEN?.trim();
-  if (!configuredToken) {
-    return false;
-  }
-
-  return readRequestToken(request) === configuredToken;
-}
-
-export function readAlbumAccessKey(request: Request): string {
-  const url = new URL(request.url);
-  return (
-    request.headers.get("x-album-access-key")?.trim() ??
-    url.searchParams.get("accessKey")?.trim() ??
-    ""
-  );
-}
-
-export function requireAlbumReadAccess(request: Request, env: CloudflareEnv, album: Album): void {
-  if (album.is_public || isAdminRequest(request, env)) {
-    return;
-  }
-
-  throw new HttpError(401, "请输入非公开相册密钥", "album_access_required");
-}
-
-export function assertAlbumAccessKey(
-  request: Request,
-  env: CloudflareEnv,
-  album: Album,
-  storedAccessKey: string
-): void {
-  if (album.is_public || isAdminRequest(request, env)) {
-    return;
-  }
-
-  if (!storedAccessKey) {
-    throw new HttpError(403, "非公开相册密钥尚未设置", "album_access_key_missing");
-  }
-
-  if (readAlbumAccessKey(request) !== storedAccessKey) {
-    throw new HttpError(401, "非公开相册密钥无效或缺失", "album_access_required");
+export function requireRequestOrigin(request: Request): void {
+  const origin = request.headers.get("origin");
+  if (!origin || origin !== new URL(request.url).origin) {
+    throw new HttpError(403, "请求来源无效", "invalid_origin");
   }
 }

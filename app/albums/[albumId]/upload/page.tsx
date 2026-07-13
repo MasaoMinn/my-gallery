@@ -1,4 +1,5 @@
 import { AlbumUploadManager } from "@/components/album-upload-manager";
+import { AdminOnly } from "@/components/admin-only";
 
 type PageProps = {
   params: Promise<{ albumId: string }>;
@@ -6,5 +7,5 @@ type PageProps = {
 
 export default async function AlbumUploadPage({ params }: PageProps) {
   const { albumId } = await params;
-  return <AlbumUploadManager albumId={albumId} />;
+  return <AdminOnly><AlbumUploadManager albumId={albumId} /></AdminOnly>;
 }

@@ -13,10 +13,10 @@ pnpm run dev
 
 Open `http://127.0.0.1:3000`.
 
-- Browse/edit albums and images on `/`.
+- Browse public albums and images on `/`; administrators can log in from the header.
 - Create albums on `/upload`.
 - Upload images from an opened album on `/albums/{albumId}/upload`.
-- Public albums can be opened by anyone. Private albums require the shared private-album access key set from the album view.
+- Public albums can be opened by anyone. Private albums are visible only to the logged-in administrator.
 
 ## Verification
 
@@ -50,9 +50,9 @@ Deploy:
 pnpm run deploy
 ```
 
-The UI does not ask users for an administrator token. Images are always written to the configured R2 binding in `wrangler.jsonc`.
+The administrator signs in once at `/admin/login`. The token is exchanged for a signed, HttpOnly seven-day session cookie and is never stored in browser JavaScript or URLs.
 
-`GALLERY_ADMIN_TOKEN` is optional. If configured as a Worker secret, it protects write APIs, but the current user-facing UI does not expose a token input. The private-album access key is separate and only unlocks private album viewing.
+`GALLERY_ADMIN_TOKEN` is required and protects every write API. If it is missing, writes fail closed. Configure it as a Worker secret; the retained `albums.access_key` column is no longer used.
 
 ## Tokens And Secrets Needed For Deployment
 
@@ -62,7 +62,7 @@ For CI/CD or headless deployment, configure:
 
 - `CLOUDFLARE_API_TOKEN`: Cloudflare API token used by Wrangler to deploy.
 - `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account id, useful for CI and multi-account setups.
-- `GALLERY_ADMIN_TOKEN`: optional runtime secret for protecting write APIs. Do not configure it unless you also add a non-user-facing admin flow that sends the token.
+- `GALLERY_ADMIN_TOKEN`: required high-entropy runtime secret used for administrator login and session signing.
 
 Recommended Cloudflare API token permissions for this app:
 
