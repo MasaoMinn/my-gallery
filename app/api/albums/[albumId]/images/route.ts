@@ -6,8 +6,8 @@ import {
   toGalleryImage
 } from "@/lib/db/gallery";
 import { getBindings } from "@/lib/cloudflare";
-import { assertUploadableImage } from "@/lib/images/validation";
-import { readImageDimensions } from "@/lib/images/dimensions";
+import { assertUploadableImageMetadata } from "@/lib/images/validation";
+import { decodeUploadHeader, IMAGE_UPLOAD_HEADERS } from "@/lib/images/upload-protocol";
 import { requireAdmin, requireAlbumReadAccess } from "@/lib/http/admin";
 import { unwrapParams } from "@/lib/http/params";
 import { created, handleRouteError, HttpError, ok } from "@/lib/http/responses";
@@ -49,51 +49,70 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       throw new HttpError(404, "相册不存在", "album_not_found");
     }
 
-    const formData = await request.formData();
-    const file = formData.get("file");
-    if (!(file instanceof File)) {
+    if (!request.body) {
       throw new HttpError(400, "缺少图片文件", "file_missing");
     }
 
-    assertUploadableImage(file, env);
+    const filename = decodeUploadHeader(request.headers.get(IMAGE_UPLOAD_HEADERS.filename));
+    const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim() ?? "";
+    const sizeBytes = parseRequiredInteger(
+      request.headers.get(IMAGE_UPLOAD_HEADERS.size),
+      "图片大小无效"
+    );
+    if (!filename || filename.length > 512) {
+      throw new HttpError(400, "图片文件名无效", "invalid_filename");
+    }
+
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && Number(contentLength) !== sizeBytes) {
+      throw new HttpError(400, "图片大小与请求内容不一致", "invalid_file_size");
+    }
+
+    assertUploadableImageMetadata({ contentType, sizeBytes }, env);
 
     const duplicate = await findDuplicateImage(env.DB, albumId, {
-      filename: file.name,
-      sizeBytes: file.size,
-      contentType: file.type
+      filename,
+      sizeBytes,
+      contentType
     });
     if (duplicate) {
       return ok({ image: toGalleryImage(duplicate), duplicate: true });
     }
 
     const metadata = imageUploadMetadataSchema.parse({
-      title: formData.get("title")?.toString() ?? "",
-      description: formData.get("description")?.toString() ?? ""
+      title: decodeUploadHeader(request.headers.get(IMAGE_UPLOAD_HEADERS.title)),
+      description: decodeUploadHeader(request.headers.get(IMAGE_UPLOAD_HEADERS.description))
     });
 
-    const arrayBuffer = await file.arrayBuffer();
-    const dimensions = readImageDimensions(arrayBuffer);
+    const width = parseOptionalDimension(request.headers.get(IMAGE_UPLOAD_HEADERS.width));
+    const height = parseOptionalDimension(request.headers.get(IMAGE_UPLOAD_HEADERS.height));
     const imageId = crypto.randomUUID();
-    const r2Key = createImageObjectKey(albumId, imageId, file.name, file.type);
+    const r2Key = createImageObjectKey(albumId, imageId, filename, contentType);
     const now = new Date().toISOString();
 
-    await putImageObject(env.GALLERY_BUCKET, r2Key, arrayBuffer, {
+    const object = await putImageObject(env.GALLERY_BUCKET, r2Key, request.body, {
       albumId,
       imageId,
-      filename: file.name,
-      contentType: file.type
+      filename,
+      contentType,
+      sizeBytes
     });
+
+    if (object.size !== sizeBytes) {
+      await deleteImageObject(env.GALLERY_BUCKET, r2Key);
+      throw new HttpError(400, "图片大小与上传内容不一致", "invalid_file_size");
+    }
 
     try {
       const image = await createImage(env.DB, {
         id: imageId,
         albumId,
         r2Key,
-        filename: file.name,
-        contentType: file.type,
-        sizeBytes: file.size,
-        width: dimensions?.width ?? null,
-        height: dimensions?.height ?? null,
+        filename,
+        contentType,
+        sizeBytes: object.size,
+        width,
+        height,
         title: metadata.title,
         description: metadata.description,
         now
@@ -107,4 +126,21 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   } catch (error) {
     return handleRouteError(error);
   }
+}
+
+function parseRequiredInteger(value: string | null, message: string): number {
+  const parsed = Number(value);
+  if (!value || !Number.isSafeInteger(parsed)) {
+    throw new HttpError(400, message, "invalid_upload_metadata");
+  }
+  return parsed;
+}
+
+function parseOptionalDimension(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 100_000 ? parsed : null;
 }

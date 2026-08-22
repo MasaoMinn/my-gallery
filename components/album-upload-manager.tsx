@@ -4,8 +4,9 @@ import type { Album, GalleryImage } from "@/lib/db/gallery";
 import { imageIdentityKey } from "@/lib/images/identity";
 import {
   apiJson,
-  uploadFormData,
+  uploadImageFile,
 } from "@/components/gallery-client";
+import { readImageDimensions } from "@/lib/images/dimensions";
 import {
   AlertCircle,
   ArrowLeft,
@@ -213,15 +214,20 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
 
         async function uploadEntry({ file, item }: UploadEntry): Promise<void> {
           updateUploadItem(item.id, { status: "uploading" });
-          const formData = new FormData();
-          formData.append("file", file);
-          formData.append("title", file.name.replace(/\.[^.]+$/, ""));
-          formData.append("description", uploadDescription);
 
           try {
-            const result = await uploadFormData<UploadApiResult>(
+            const dimensions = readImageDimensions(
+              await file.slice(0, 512 * 1024).arrayBuffer()
+            );
+            const result = await uploadImageFile<UploadApiResult>(
               `/api/albums/${albumId}/images`,
-              formData,
+              file,
+              {
+                title: file.name.replace(/\.[^.]+$/, ""),
+                description: uploadDescription,
+                width: dimensions?.width ?? null,
+                height: dimensions?.height ?? null
+              },
               (progress) => updateUploadItem(item.id, { progress })
             );
             if (result.duplicate) {

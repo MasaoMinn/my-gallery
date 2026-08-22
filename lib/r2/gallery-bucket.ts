@@ -19,15 +19,17 @@ export function createImageObjectKey(
 export async function putImageObject(
   bucket: R2Bucket,
   key: string,
-  body: ArrayBuffer,
+  body: ReadableStream,
   image: {
     albumId: string;
     imageId: string;
     filename: string;
     contentType: string;
+    sizeBytes: number;
   }
-): Promise<void> {
-  await bucket.put(key, body, {
+): Promise<R2Object> {
+  const fixedLengthStream = new FixedLengthStream(image.sizeBytes);
+  const putPromise = bucket.put(key, fixedLengthStream.readable, {
     httpMetadata: {
       contentType: image.contentType,
       cacheControl: "public,max-age=31536000,immutable"
@@ -38,6 +40,16 @@ export async function putImageObject(
       originalFilename: image.filename
     }
   });
+  const [, object] = await Promise.all([
+    body.pipeTo(fixedLengthStream.writable),
+    putPromise
+  ]);
+
+  if (!object) {
+    throw new Error("R2 rejected the image upload");
+  }
+
+  return object;
 }
 
 export async function deleteImageObject(bucket: R2Bucket, key: string): Promise<void> {

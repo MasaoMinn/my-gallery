@@ -196,11 +196,17 @@ test("authenticated upload page does not mix in image upload controls", async ({
 test("image upload reports progress and a successful result", async ({ page }) => {
   await mockSession(page, true);
   let images = [] as typeof image[];
+  let uploadedContentType = "";
+  let uploadedFilename = "";
+  let uploadedBody = "";
   await page.route("**/api/albums/album-1", (route) =>
     route.fulfill({ json: { data: album } })
   );
   await page.route("**/api/albums/album-1/images", async (route) => {
     if (route.request().method() === "POST") {
+      uploadedContentType = route.request().headers()["content-type"] ?? "";
+      uploadedFilename = route.request().headers()["x-gallery-filename"] ?? "";
+      uploadedBody = route.request().postDataBuffer()?.toString() ?? "";
       images = [image];
       await route.fulfill({ json: { data: { image, duplicate: false } } });
       return;
@@ -222,6 +228,9 @@ test("image upload reports progress and a successful result", async ({ page }) =
   await expect(page.getByLabel("全部图片上传进度")).toHaveJSProperty("value", 100);
   await expect(page.getByText("test.jpg")).toBeVisible();
   await expect(page.getByText(/已完成/)).toBeVisible();
+  expect(uploadedContentType).toBe("image/jpeg");
+  expect(decodeURIComponent(uploadedFilename)).toBe("test.jpg");
+  expect(uploadedBody).toBe("test-image");
 });
 
 test("image upload keeps server errors visible per item", async ({ page }) => {

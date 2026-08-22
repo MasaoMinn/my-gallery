@@ -1,3 +1,5 @@
+import { IMAGE_UPLOAD_HEADERS, encodeUploadHeader } from "@/lib/images/upload-protocol";
+
 export type ApiEnvelope<T> = {
   data?: T;
   error?: {
@@ -36,15 +38,35 @@ export async function apiJson<T>(input: RequestInfo | URL, init?: RequestInit): 
   return payload.data as T;
 }
 
-export function uploadFormData<T>(
+type ImageUploadMetadata = {
+  title: string;
+  description: string;
+  width: number | null;
+  height: number | null;
+};
+
+export function uploadImageFile<T>(
   input: string,
-  body: FormData,
+  file: File,
+  metadata: ImageUploadMetadata,
   onProgress: (progress: number) => void
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", input);
     request.responseType = "json";
+    request.setRequestHeader("content-type", file.type);
+    request.setRequestHeader(IMAGE_UPLOAD_HEADERS.filename, encodeUploadHeader(file.name));
+    request.setRequestHeader(IMAGE_UPLOAD_HEADERS.size, String(file.size));
+    request.setRequestHeader(IMAGE_UPLOAD_HEADERS.title, encodeUploadHeader(metadata.title));
+    request.setRequestHeader(
+      IMAGE_UPLOAD_HEADERS.description,
+      encodeUploadHeader(metadata.description)
+    );
+    if (metadata.width && metadata.height) {
+      request.setRequestHeader(IMAGE_UPLOAD_HEADERS.width, String(metadata.width));
+      request.setRequestHeader(IMAGE_UPLOAD_HEADERS.height, String(metadata.height));
+    }
 
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable && event.total > 0) {
@@ -76,7 +98,7 @@ export function uploadFormData<T>(
       reject(new ApiError("图片上传已取消", 0, "upload_aborted"));
     });
 
-    request.send(body);
+    request.send(file);
   });
 }
 

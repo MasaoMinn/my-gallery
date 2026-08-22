@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { assertUploadableImage, getMaxUploadBytes } from "@/lib/images/validation";
+import {
+  assertUploadableImage,
+  assertUploadableImageMetadata,
+  getMaxUploadBytes
+} from "@/lib/images/validation";
 
 const env = {
   GALLERY_MAX_UPLOAD_MB: "1"
@@ -24,5 +28,14 @@ describe("image upload validation", () => {
     const bytes = new Uint8Array(1024 * 1024 + 1);
     const file = new File([bytes], "large.jpg", { type: "image/jpeg" });
     expect(() => assertUploadableImage(file, env)).toThrow("不能超过");
+  });
+
+  it("validates streamed upload metadata without buffering a File", () => {
+    expect(() =>
+      assertUploadableImageMetadata(
+        { contentType: "image/jpeg", sizeBytes: 512 * 1024 },
+        env
+      )
+    ).not.toThrow();
   });
 });

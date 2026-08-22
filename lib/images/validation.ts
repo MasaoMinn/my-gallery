@@ -15,7 +15,17 @@ export function getMaxUploadBytes(env: CloudflareEnv): number {
 }
 
 export function assertUploadableImage(file: File, env: CloudflareEnv): void {
-  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+  assertUploadableImageMetadata(
+    { contentType: file.type, sizeBytes: file.size },
+    env
+  );
+}
+
+export function assertUploadableImageMetadata(
+  image: { contentType: string; sizeBytes: number },
+  env: CloudflareEnv
+): void {
+  if (!ALLOWED_IMAGE_TYPES.has(image.contentType)) {
     throw new HttpError(
       400,
       "仅支持 JPEG、PNG、WebP、AVIF 和 GIF 图片",
@@ -24,11 +34,11 @@ export function assertUploadableImage(file: File, env: CloudflareEnv): void {
   }
 
   const maxBytes = getMaxUploadBytes(env);
-  if (file.size <= 0) {
+  if (!Number.isSafeInteger(image.sizeBytes) || image.sizeBytes <= 0) {
     throw new HttpError(400, "图片文件不能为空", "empty_file");
   }
 
-  if (file.size > maxBytes) {
+  if (image.sizeBytes > maxBytes) {
     throw new HttpError(
       413,
       `图片不能超过 ${Math.round(maxBytes / 1024 / 1024)}MB`,

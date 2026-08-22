@@ -25,7 +25,11 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     }
     await requireAlbumReadAccess(request, env, album);
 
-    const object = await env.GALLERY_BUCKET.get(image.r2_key);
+    const rangeRequested = request.headers.has("range");
+    const object = await env.GALLERY_BUCKET.get(
+      image.r2_key,
+      rangeRequested ? { range: request.headers } : undefined
+    );
     if (!object) {
       throw new HttpError(404, "图片文件不存在", "image_object_not_found");
     }
@@ -40,6 +44,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       headers.set("content-language", metadata.contentLanguage);
     }
     headers.set("etag", object.httpEtag);
+    headers.set("accept-ranges", "bytes");
     headers.set(
       "cache-control",
       album.is_public ? "public,max-age=31536000,immutable" : "private,no-store"
@@ -53,10 +58,35 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       return new Response(null, { headers, status: 304 });
     }
 
+    const responseRange = object.range;
+    if (rangeRequested && responseRange) {
+      const { offset, length } = normalizeRange(responseRange, object.size);
+      headers.set("content-range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
+      headers.set("content-length", String(length));
+      return new Response(object.body, { headers, status: 206 });
+    }
+
+    headers.set("content-length", String(object.size));
     return new Response(object.body, { headers });
   } catch (error) {
     return handleRouteError(error);
   }
+}
+
+function normalizeRange(range: R2Range, objectSize: number): { offset: number; length: number } {
+  if ("suffix" in range && typeof range.suffix === "number") {
+    const length = Math.min(range.suffix, objectSize);
+    return { offset: objectSize - length, length };
+  }
+
+  const offset = "offset" in range && typeof range.offset === "number" ? range.offset : 0;
+  return {
+    offset,
+    length:
+      "length" in range && typeof range.length === "number"
+        ? range.length
+        : Math.max(0, objectSize - offset)
+  };
 }
 
 function etagMatches(ifNoneMatch: string | null, etag: string): boolean {
