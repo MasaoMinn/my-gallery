@@ -1,15 +1,7 @@
 import { ZodError } from "zod";
+import { HttpError } from "@/lib/http/errors";
 
-export class HttpError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-    public readonly code = "request_error"
-  ) {
-    super(message);
-    this.name = "HttpError";
-  }
-}
+export { HttpError } from "@/lib/http/errors";
 
 export function ok<T>(data: T, init?: ResponseInit): Response {
   return Response.json({ data }, init);

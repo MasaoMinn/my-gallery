@@ -1,5 +1,4 @@
-import { AlbumUploadManager } from "@/components/album-upload-manager";
-import { AdminOnly } from "@/components/admin-only";
+import { redirect } from "next/navigation";
 
 type PageProps = {
   params: Promise<{ albumId: string }>;
@@ -7,5 +6,5 @@ type PageProps = {
 
 export default async function AlbumUploadPage({ params }: PageProps) {
   const { albumId } = await params;
-  return <AdminOnly><AlbumUploadManager albumId={albumId} /></AdminOnly>;
+  redirect(`/album-upload?albumId=${encodeURIComponent(albumId)}`);
 }

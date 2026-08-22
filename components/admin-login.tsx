@@ -4,15 +4,17 @@ import { useAdminSession } from "@/components/admin-session";
 import { apiJson } from "@/components/gallery-client";
 import { ArrowLeft, KeyRound, LoaderCircle, LogIn } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
-export function AdminLogin({ nextPath }: { nextPath: string }) {
+export function AdminLogin() {
   const { authenticated, loading, refresh, tokenConfigured } = useAdminSession();
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = safeNextPath(searchParams.get("next") ?? undefined);
 
   useEffect(() => {
     if (!loading && authenticated) {
@@ -82,4 +84,21 @@ export function AdminLogin({ nextPath }: { nextPath: string }) {
       </form>
     </main>
   );
+}
+
+function safeNextPath(value: string | undefined): string {
+  if (!value) {
+    return "/";
+  }
+
+  try {
+    const base = new URL("https://gallery.local");
+    const target = new URL(value, base);
+    if (target.origin !== base.origin) {
+      return "/";
+    }
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return "/";
+  }
 }

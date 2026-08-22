@@ -466,7 +466,7 @@ export function GalleryApp() {
             {authenticated ? (
               <>
                 {selectedAlbum ? (
-                  <Link className="primary-button" href={`/albums/${selectedAlbum.id}/upload`}>
+                  <Link className="primary-button" href={`/album-upload?albumId=${encodeURIComponent(selectedAlbum.id)}`}>
                     <Upload aria-hidden="true" size={17} />
                     上传图片
                   </Link>
@@ -562,7 +562,7 @@ export function GalleryApp() {
                 <h3>最近上传</h3>
                 <p>{authenticated ? "这个相册还没有图片，可以从当前相册上传。" : "这个相册目前没有公开图片。"}</p>
                 {authenticated ? (
-                  <Link className="primary-button" href={`/albums/${selectedAlbum.id}/upload`}>
+                  <Link className="primary-button" href={`/album-upload?albumId=${encodeURIComponent(selectedAlbum.id)}`}>
                     上传图片
                   </Link>
                 ) : null}

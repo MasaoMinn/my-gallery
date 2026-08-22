@@ -5,7 +5,7 @@ import {
   verifyAdminSession,
   verifyAdminToken
 } from "@/lib/auth/admin-session";
-import { HttpError } from "@/lib/http/responses";
+import { HttpError } from "@/lib/http/errors";
 
 export function configuredAdminToken(env: CloudflareEnv): string {
   const token = env.GALLERY_ADMIN_TOKEN?.trim() ?? "";

@@ -7,9 +7,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
+    "cf:build": "opennextjs-cloudflare build && node scripts/copy-static-pages.mjs",
+    "preview": "pnpm cf:build && opennextjs-cloudflare preview",
+    "deploy": "pnpm cf:build && opennextjs-cloudflare deploy",
+    "upload": "pnpm cf:build && opennextjs-cloudflare upload",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

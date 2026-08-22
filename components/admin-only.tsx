@@ -2,19 +2,22 @@
 
 import { useAdminSession } from "@/components/admin-session";
 import { LoaderCircle } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 
 export function AdminOnly({ children }: { children: React.ReactNode }) {
   const { authenticated, loading } = useAdminSession();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
+  const query = searchParams.toString();
+  const returnPath = query ? `${pathname}?${query}` : pathname;
 
   useEffect(() => {
     if (!loading && !authenticated) {
-      router.replace(`/admin/login?next=${encodeURIComponent(pathname)}`);
+      router.replace(`/admin/login?next=${encodeURIComponent(returnPath)}`);
     }
-  }, [authenticated, loading, pathname, router]);
+  }, [authenticated, loading, returnPath, router]);
 
   if (loading || !authenticated) {
     return (

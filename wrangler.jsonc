@@ -2,12 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "my-gallery",
   "account_id": "e53e88d84fa1e4aa57c2027cacce45a5",
-  "main": ".open-next/worker.js",
+  "main": "custom-worker.ts",
   "compatibility_date": "2026-07-08",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
     "directory": ".open-next/assets",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "run_worker_first": false
   },
   "services": [
     {

@@ -1,4 +1,4 @@
-import { HttpError } from "@/lib/http/responses";
+import { HttpError } from "@/lib/http/errors";
 
 export const ALLOWED_IMAGE_TYPES = new Set([
   "image/jpeg",

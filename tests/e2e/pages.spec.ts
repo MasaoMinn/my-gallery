@@ -217,7 +217,7 @@ test("image upload reports progress and a successful result", async ({ page }) =
     route.fulfill({ json: { data: { duplicateIds: [] } } })
   );
 
-  await page.goto("/albums/album-1/upload");
+  await page.goto("/album-upload?albumId=album-1");
   await page.locator('input[type="file"]').setInputFiles({
     buffer: Buffer.from("test-image"),
     mimeType: "image/jpeg",
@@ -252,7 +252,7 @@ test("image upload keeps server errors visible per item", async ({ page }) => {
     route.fulfill({ json: { data: { duplicateIds: [] } } })
   );
 
-  await page.goto("/albums/album-1/upload");
+  await page.goto("/album-upload?albumId=album-1");
   await page.locator('input[type="file"]').setInputFiles({
     buffer: Buffer.from("oversized-image"),
     mimeType: "image/jpeg",
@@ -281,7 +281,7 @@ test("existing duplicate images are skipped before file upload", async ({ page }
     await route.fulfill({ json: { data: { duplicateIds: [input.files[0].clientId] } } });
   });
 
-  await page.goto("/albums/album-1/upload");
+  await page.goto("/album-upload?albumId=album-1");
   await page.locator('input[type="file"]').setInputFiles({
     buffer: Buffer.from("already-there"),
     mimeType: "image/jpeg",
