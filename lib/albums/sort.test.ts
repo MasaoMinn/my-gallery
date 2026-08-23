@@ -12,6 +12,7 @@ function album(
     id,
     title,
     description: "",
+    album_type: "album",
     is_public: true,
     cover_image_id: null,
     created_at: createdAt,

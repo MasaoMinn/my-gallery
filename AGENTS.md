@@ -57,9 +57,22 @@ Suggested fields:
 - `id`: stable unique identifier.
 - `title`: album title.
 - `description`: album description text.
+- `album_type`: `album` for a regular album or `setting` for a setting collection.
 - `is_public`: whether the album can be viewed without administrator authentication.
 - `access_key`: retained only for database compatibility; do not use it for access control.
 - `cover_image_id`: optional image used as album cover.
+- `created_at`: creation timestamp.
+- `updated_at`: update timestamp.
+
+### album_fields
+
+Flexible ordered key/value rows shown above the image gallery for setting collections.
+
+- `id`: stable unique identifier.
+- `album_id`: parent setting collection id.
+- `label`: editable field name such as name, species, gender, or personality.
+- `value`: editable plain-text field value.
+- `sort_order`: display order inside the setting collection.
 - `created_at`: creation timestamp.
 - `updated_at`: update timestamp.
 
@@ -191,3 +204,13 @@ Until clarified, assume:
 - Image descriptions are plain text, not rich text.
 - The UI should be responsive and usable on desktop and mobile.
 - The implementation should start simple, then add advanced optimization once the core upload/browse flow works.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

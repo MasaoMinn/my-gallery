@@ -1,7 +1,10 @@
+export type AlbumType = "album" | "setting";
+
 export type Album = {
   id: string;
   title: string;
   description: string;
+  album_type: AlbumType;
   is_public: boolean;
   cover_image_id: string | null;
   created_at: string;
@@ -9,6 +12,14 @@ export type Album = {
   image_count: number;
   total_size_bytes: number;
   cover_image: ImageSummary | null;
+};
+
+export type AlbumField = {
+  id: string;
+  album_id: string;
+  label: string;
+  value: string;
+  sort_order: number;
 };
 
 export type ImageSummary = {
@@ -36,6 +47,7 @@ type AlbumListRow = {
   id: string;
   title: string;
   description: string;
+  album_type: string | null;
   is_public: number | string | null;
   access_key: string | null;
   cover_image_id: string | null;
@@ -98,25 +110,65 @@ export async function listAlbums(db: D1Database, includePrivate = false): Promis
 
 export async function createAlbum(
   db: D1Database,
-  input: { id: string; title: string; description: string; isPublic: boolean; now: string }
+  input: {
+    id: string;
+    title: string;
+    description: string;
+    albumType: AlbumType;
+    isPublic: boolean;
+    now: string;
+  }
 ): Promise<Album> {
-  await db
-    .prepare(
+  const statements = [
+    db.prepare(
       `
-      INSERT INTO albums (id, title, description, is_public, access_key, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO albums (
+        id, title, description, album_type, is_public, access_key, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .bind(
       input.id,
       input.title,
       input.description,
+      input.albumType,
       input.isPublic ? 1 : 0,
       "",
       input.now,
       input.now
     )
-    .run();
+  ];
+
+  if (input.albumType === "setting") {
+    const defaultFields = [
+      ["名字", input.title],
+      ["物种", ""],
+      ["性别", ""],
+      ["性格", ""]
+    ];
+    statements.push(
+      ...defaultFields.map(([label, value], index) =>
+        db.prepare(
+          `
+          INSERT INTO album_fields (
+            id, album_id, label, value, sort_order, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          `
+        ).bind(
+          crypto.randomUUID(),
+          input.id,
+          label,
+          value,
+          index,
+          input.now,
+          input.now
+        )
+      )
+    );
+  }
+
+  await db.batch(statements);
 
   const album = await getAlbum(db, input.id);
   if (!album) {
@@ -124,6 +176,60 @@ export async function createAlbum(
   }
 
   return album;
+}
+
+export async function listAlbumFields(
+  db: D1Database,
+  albumId: string
+): Promise<AlbumField[]> {
+  const result = await db
+    .prepare(
+      `
+      SELECT id, album_id, label, value, sort_order
+      FROM album_fields
+      WHERE album_id = ?
+      ORDER BY sort_order ASC, id ASC
+      `
+    )
+    .bind(albumId)
+    .all<AlbumField>();
+
+  return (result.results ?? []).map((field) => ({
+    ...field,
+    sort_order: toNumber(field.sort_order)
+  }));
+}
+
+export async function replaceAlbumFields(
+  db: D1Database,
+  albumId: string,
+  fields: Array<{ label: string; value: string }>,
+  now: string
+): Promise<AlbumField[]> {
+  const statements = [
+    db.prepare("DELETE FROM album_fields WHERE album_id = ?").bind(albumId),
+    ...fields.map((field, index) =>
+      db.prepare(
+        `
+        INSERT INTO album_fields (
+          id, album_id, label, value, sort_order, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `
+      ).bind(
+        crypto.randomUUID(),
+        albumId,
+        field.label,
+        field.value,
+        index,
+        now,
+        now
+      )
+    ),
+    db.prepare("UPDATE albums SET updated_at = ? WHERE id = ?").bind(now, albumId)
+  ];
+
+  await db.batch(statements);
+  return listAlbumFields(db, albumId);
 }
 
 export async function getAlbum(db: D1Database, albumId: string): Promise<Album | null> {
@@ -415,6 +521,7 @@ function toAlbum(row: AlbumListRow): Album {
     id: row.id,
     title: row.title,
     description: row.description,
+    album_type: row.album_type === "setting" ? "setting" : "album",
     is_public: toBoolean(row.is_public),
     cover_image_id: row.cover_image_id,
     created_at: row.created_at,

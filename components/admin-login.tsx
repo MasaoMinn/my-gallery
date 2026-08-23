@@ -6,11 +6,11 @@ import { ArrowLeft, KeyRound, LoaderCircle, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 export function AdminLogin() {
   const { authenticated, loading, refresh, tokenConfigured } = useAdminSession();
   const [token, setToken] = useState("");
-  const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -25,7 +25,6 @@ export function AdminLogin() {
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
-    setError("");
     try {
       await apiJson<{ authenticated: true }>("/api/admin/session", {
         method: "POST",
@@ -35,7 +34,7 @@ export function AdminLogin() {
       await refresh();
       router.replace(nextPath);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "登录失败");
+      toast.error(caught instanceof Error ? caught.message : "登录失败", { duration: 6_000 });
     } finally {
       setSubmitting(false);
     }
@@ -70,7 +69,6 @@ export function AdminLogin() {
                 value={token}
               />
             </label>
-            {error ? <p className="form-error" role="alert">{error}</p> : null}
             <button className="primary-button" disabled={submitting || !token.trim()} type="submit">
               {submitting ? <LoaderCircle aria-hidden="true" className="spin" size={17} /> : <LogIn aria-hidden="true" size={17} />}
               登录

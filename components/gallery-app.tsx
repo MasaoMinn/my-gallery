@@ -1,6 +1,6 @@
 "use client";
 
-import type { Album, GalleryImage } from "@/lib/db/gallery";
+import type { Album, AlbumType, GalleryImage } from "@/lib/db/gallery";
 import {
   sortAlbums,
   type AlbumSortField,
@@ -12,9 +12,12 @@ import {
 } from "@/components/gallery-client";
 import { useAdminSession } from "@/components/admin-session";
 import { ImageMasonry } from "@/components/image-masonry";
+import { AlbumFieldsEditor } from "@/components/album-fields-editor";
 import type { ImageSize } from "@/lib/images/masonry";
 import {
   Folder,
+  BookOpen,
+  Cloud,
   Globe2,
   ImageIcon,
   LoaderCircle,
@@ -29,17 +32,16 @@ import {
   ArrowLeft,
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  Eraser,
   Trash2,
   Upload,
   X
 } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
-
-type Notice = {
-  tone: "success" | "error" | "info";
-  text: string;
-};
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 const IMAGE_SIZE_OPTIONS: Array<{ value: ImageSize; label: string; columns: number }> = [
   { value: "xlarge", label: "特大", columns: 3 },
@@ -49,7 +51,10 @@ const IMAGE_SIZE_OPTIONS: Array<{ value: ImageSize; label: string; columns: numb
   { value: "xsmall", label: "特小", columns: 8 }
 ];
 
+type AlbumTypeFilter = "all" | AlbumType;
+
 export function GalleryApp() {
+  const router = useRouter();
   const { authenticated, loading: loadingAdmin, logout } = useAdminSession();
   const [albums, setAlbums] = useState<Album[]>([]);
   const [images, setImages] = useState<GalleryImage[]>([]);
@@ -66,17 +71,20 @@ export function GalleryApp() {
   const [albumCreate, setAlbumCreate] = useState({
     title: "",
     description: "",
+    albumType: "album" as AlbumType,
     isPublic: true
   });
   const [imageEdit, setImageEdit] = useState({ description: "" });
   const [query, setQuery] = useState("");
+  const [albumTypeFilter, setAlbumTypeFilter] = useState<AlbumTypeFilter>("all");
   const [albumSortField, setAlbumSortField] = useState<AlbumSortField>("updatedAt");
   const [albumSortDirection, setAlbumSortDirection] = useState<SortDirection>("desc");
   const [imageSize, setImageSize] = useState<ImageSize>("medium");
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [imageCacheVersion, setImageCacheVersion] = useState(0);
   const [loadingAlbums, setLoadingAlbums] = useState(true);
   const [loadingImages, setLoadingImages] = useState(false);
   const [mutating, setMutating] = useState(false);
+  const refreshMenuRef = useRef<HTMLDetailsElement>(null);
 
   const selectedAlbum = useMemo(
     () => albums.find((album) => album.id === selectedAlbumId) ?? null,
@@ -90,20 +98,19 @@ export function GalleryApp() {
 
   const visibleAlbums = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    const matchingAlbums = normalized ? albums.filter(
-      (album) =>
+    const matchingAlbums = albums.filter((album) => {
+      const matchesType = albumTypeFilter === "all" || album.album_type === albumTypeFilter;
+      const matchesQuery = !normalized ||
         album.title.toLowerCase().includes(normalized) ||
-        album.description.toLowerCase().includes(normalized)
-    ) : albums;
+        album.description.toLowerCase().includes(normalized);
+      return matchesType && matchesQuery;
+    });
 
     return sortAlbums(matchingAlbums, albumSortField, albumSortDirection);
-  }, [albums, albumSortDirection, albumSortField, query]);
+  }, [albums, albumSortDirection, albumSortField, albumTypeFilter, query]);
 
   function showError(error: unknown) {
-    setNotice({
-      tone: "error",
-      text: error instanceof Error ? error.message : "操作失败"
-    });
+    toast.error(error instanceof Error ? error.message : "操作失败", { duration: 6_000 });
   }
 
   useEffect(() => {
@@ -181,6 +188,13 @@ export function GalleryApp() {
     }
   }
 
+  async function clearImageCache() {
+    refreshMenuRef.current?.removeAttribute("open");
+    setImageCacheVersion((current) => Math.max(current + 1, Date.now()));
+    toast.success("图片缓存已清除，正在刷新");
+    await refreshAlbums();
+  }
+
   function selectAlbum(album: Album) {
     applyAlbumSelection(album);
     setImages([]);
@@ -224,7 +238,7 @@ export function GalleryApp() {
 
   function closeAlbumCreate() {
     setAlbumCreateOpen(false);
-    setAlbumCreate({ title: "", description: "", isPublic: true });
+    setAlbumCreate({ title: "", description: "", albumType: "album", isPublic: true });
   }
 
   async function createAlbum(event: FormEvent<HTMLFormElement>) {
@@ -241,7 +255,7 @@ export function GalleryApp() {
       applyImageSelection(null);
       setImages([]);
       closeAlbumCreate();
-      setNotice({ tone: "success", text: `相册「${album.title}」已创建` });
+      toast.success(`${albumTypeLabel(album.album_type)}「${album.title}」已创建`);
     });
   }
 
@@ -266,7 +280,7 @@ export function GalleryApp() {
       setAlbums((current) => current.map((item) => (item.id === album.id ? album : item)));
       applyAlbumSelection(album);
       setAlbumEditOpen(false);
-      setNotice({ tone: "success", text: "相册信息已保存" });
+      toast.success("相册信息已保存");
     });
   }
 
@@ -292,7 +306,7 @@ export function GalleryApp() {
         setImageEdit({ description: "" });
         setImages([]);
       }
-      setNotice({ tone: "success", text: "相册和图片已删除" });
+      toast.success("相册和图片已删除");
     });
   }
 
@@ -311,7 +325,7 @@ export function GalleryApp() {
 
       setImages((current) => current.map((item) => (item.id === image.id ? image : item)));
       applyImageSelection(null);
-      setNotice({ tone: "success", text: "图片描述已保存" });
+      toast.success("图片描述已保存");
     });
   }
 
@@ -329,7 +343,7 @@ export function GalleryApp() {
       setImages(remaining);
       applyImageSelection(null);
       await refreshAlbums(selectedAlbumId);
-      setNotice({ tone: "success", text: "图片已删除" });
+      toast.success("图片已删除");
     });
   }
 
@@ -339,7 +353,7 @@ export function GalleryApp() {
       await action();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        window.location.assign(`/admin/login?next=${encodeURIComponent(window.location.pathname)}`);
+        router.push(`/admin/login?next=${encodeURIComponent(window.location.pathname)}`);
         return;
       }
       showError(error);
@@ -351,52 +365,104 @@ export function GalleryApp() {
   async function signOut() {
     await logout();
     returnToAlbums();
-    setNotice({ tone: "success", text: "已退出管理员会话" });
+    toast.success("已退出管理员会话");
   }
 
   return (
     <main className={`app-shell ${selectedAlbum ? "image-view" : "album-view"}`}>
       <section className="workspace" aria-label="图片浏览区">
         <header className="workspace-header">
-          <div className="workspace-title">
+          <div className="top-navigation">
             <div className="brand inline-brand">
-              <div className="brand-mark">
-                <ImageIcon aria-hidden="true" size={22} />
+              <div className="brand-mark cloudflare-brand-mark">
+                <Cloud aria-hidden="true" size={23} strokeWidth={2.2} />
               </div>
-              <div>
-                <h1>My Gallery</h1>
-                <p>Cloudflare 相册</p>
-              </div>
+              <h1>Cloudflare Album</h1>
             </div>
-            {selectedAlbum ? (
-              <button className="secondary-button compact-button" onClick={returnToAlbums} type="button">
-                <ArrowLeft aria-hidden="true" size={16} />
-                返回相册
-              </button>
-            ) : null}
-            <p className="section-label">{selectedAlbum ? "图片" : "相册"}</p>
-            <div className="album-title-row">
-              <h2>{selectedAlbum?.title ?? "相册"}</h2>
-              {selectedAlbum && authenticated ? (
-                <button
-                  aria-label="编辑相册信息"
-                  className="secondary-button compact-button"
-                  onClick={() => setAlbumEditOpen(true)}
-                  type="button"
-                >
-                  <Pencil aria-hidden="true" size={15} />
-                  编辑相册
-                </button>
+            <nav aria-label="管理菜单" className="top-navigation-actions">
+              {authenticated ? (
+                <>
+                  {selectedAlbum ? (
+                    <Link className="primary-button" href={`/album-upload?albumId=${encodeURIComponent(selectedAlbum.id)}`}>
+                      <Upload aria-hidden="true" size={17} />
+                      上传图片
+                    </Link>
+                  ) : (
+                    <button
+                      className="primary-button"
+                      onClick={() => setAlbumCreateOpen(true)}
+                      type="button"
+                    >
+                      <Plus aria-hidden="true" size={17} />
+                      新建内容
+                    </button>
+                  )}
+                  <button className="secondary-button" onClick={() => void signOut()} type="button">
+                    <LogOut aria-hidden="true" size={16} />
+                    退出管理
+                  </button>
+                </>
+              ) : !loadingAdmin ? (
+                <Link className="secondary-button" href="/admin/login">
+                  <LogIn aria-hidden="true" size={16} />
+                  管理员登录
+                </Link>
               ) : null}
-            </div>
-            <span>
-              {selectedAlbum
-                ? `${selectedAlbum.image_count} 张图片 · ${formatBytes(selectedAlbum.total_size_bytes)}`
-                : "选择一个相册后浏览其中图片"}
-            </span>
+            </nav>
           </div>
 
-          <div className="toolbar">
+          {selectedAlbum ? (
+            <div className="content-context">
+              <button className="back-button" onClick={returnToAlbums} type="button">
+                <span className="back-button-icon">
+                  <ArrowLeft aria-hidden="true" size={17} />
+                </span>
+                <span>返回首页</span>
+              </button>
+              <div className="album-context-copy">
+                <div className="album-context-badges">
+                  <span className={`type-pill ${selectedAlbum.album_type}`}>
+                    {selectedAlbum.album_type === "setting" ? (
+                      <BookOpen aria-hidden="true" size={13} />
+                    ) : (
+                      <Folder aria-hidden="true" size={13} />
+                    )}
+                    {albumTypeLabel(selectedAlbum.album_type)}
+                  </span>
+                  <span className={`status-pill ${selectedAlbum.is_public ? "public" : "private"}`}>
+                    {selectedAlbum.is_public ? (
+                      <Globe2 aria-hidden="true" size={13} />
+                    ) : (
+                      <Lock aria-hidden="true" size={13} />
+                    )}
+                    {selectedAlbum.is_public ? "公开" : "非公开"}
+                  </span>
+                </div>
+                <div className="album-title-row">
+                  <h2>{selectedAlbum.title}</h2>
+                  {authenticated ? (
+                    <button
+                      aria-label="编辑标题与描述"
+                      className="icon-button album-edit-button"
+                      onClick={() => setAlbumEditOpen(true)}
+                      title="编辑标题与描述"
+                      type="button"
+                    >
+                      <Pencil aria-hidden="true" size={17} />
+                    </button>
+                  ) : null}
+                </div>
+                {selectedAlbum.description ? (
+                  <p className="album-context-description">{selectedAlbum.description}</p>
+                ) : null}
+                <span className="album-context-meta">
+                  {selectedAlbum.image_count} 张图片 · {formatBytes(selectedAlbum.total_size_bytes)}
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          <div className={`toolbar toolbar-panel ${selectedAlbum ? "image-toolbar" : "album-toolbar"}`}>
             {!selectedAlbum ? (
               <>
                 <label className="search-box toolbar-search">
@@ -404,39 +470,57 @@ export function GalleryApp() {
                   <input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="搜索相册"
+                    placeholder="搜索相册或设定集"
                     type="search"
                   />
                 </label>
-                <label className="sort-control">
-                  <span>排序</span>
-                  <select
-                    aria-label="相册排序字段"
-                    onChange={(event) => setAlbumSortField(event.target.value as AlbumSortField)}
-                    value={albumSortField}
+                <div aria-label="内容类型筛选" className="type-filter" role="group">
+                  {([
+                    ["all", "全部"],
+                    ["album", "相册"],
+                    ["setting", "设定集"]
+                  ] as const).map(([value, label]) => (
+                    <button
+                      aria-pressed={albumTypeFilter === value}
+                      key={value}
+                      onClick={() => setAlbumTypeFilter(value)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="sort-menu-group">
+                  <label className="sort-control">
+                    <span>排序</span>
+                    <select
+                      aria-label="相册排序字段"
+                      onChange={(event) => setAlbumSortField(event.target.value as AlbumSortField)}
+                      value={albumSortField}
+                    >
+                      <option value="title">名称</option>
+                      <option value="createdAt">创建时间</option>
+                      <option value="updatedAt">更改时间</option>
+                      <option value="size">内容大小</option>
+                    </select>
+                  </label>
+                  <button
+                    aria-label={albumSortDirection === "asc" ? "当前升序，切换为降序" : "当前降序，切换为升序"}
+                    className="secondary-button sort-direction"
+                    onClick={() =>
+                      setAlbumSortDirection((current) => (current === "asc" ? "desc" : "asc"))
+                    }
+                    title={albumSortDirection === "asc" ? "升序" : "降序"}
+                    type="button"
                   >
-                    <option value="title">相册名字</option>
-                    <option value="createdAt">创建时间</option>
-                    <option value="updatedAt">更改时间</option>
-                    <option value="size">相册大小</option>
-                  </select>
-                </label>
-                <button
-                  aria-label={albumSortDirection === "asc" ? "当前升序，切换为降序" : "当前降序，切换为升序"}
-                  className="secondary-button sort-direction"
-                  onClick={() =>
-                    setAlbumSortDirection((current) => (current === "asc" ? "desc" : "asc"))
-                  }
-                  title={albumSortDirection === "asc" ? "升序" : "降序"}
-                  type="button"
-                >
-                  {albumSortDirection === "asc" ? (
-                    <ArrowUp aria-hidden="true" size={16} />
-                  ) : (
-                    <ArrowDown aria-hidden="true" size={16} />
-                  )}
-                  {albumSortDirection === "asc" ? "升序" : "降序"}
-                </button>
+                    {albumSortDirection === "asc" ? (
+                      <ArrowUp aria-hidden="true" size={16} />
+                    ) : (
+                      <ArrowDown aria-hidden="true" size={16} />
+                    )}
+                    {albumSortDirection === "asc" ? "升序" : "降序"}
+                  </button>
+                </div>
               </>
             ) : null}
             {selectedAlbum ? (
@@ -459,46 +543,33 @@ export function GalleryApp() {
                 </div>
               </div>
             ) : null}
-            <button className="secondary-button" onClick={() => void refreshAlbums()} type="button">
-              <RefreshCw aria-hidden="true" size={16} />
-              刷新
-            </button>
-            {authenticated ? (
-              <>
-                {selectedAlbum ? (
-                  <Link className="primary-button" href={`/album-upload?albumId=${encodeURIComponent(selectedAlbum.id)}`}>
-                    <Upload aria-hidden="true" size={17} />
-                    上传图片
-                  </Link>
-                ) : (
-                  <button
-                    className="primary-button"
-                    onClick={() => setAlbumCreateOpen(true)}
-                    type="button"
-                  >
-                    <Folder aria-hidden="true" size={17} />
-                    新建相册
+            <div
+              className="refresh-dropdown"
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  refreshMenuRef.current?.removeAttribute("open");
+                }
+              }}
+              onMouseLeave={() => refreshMenuRef.current?.removeAttribute("open")}
+            >
+              <button className="secondary-button refresh-main-button" onClick={() => void refreshAlbums()} type="button">
+                <RefreshCw aria-hidden="true" size={16} />
+                刷新
+              </button>
+              <details ref={refreshMenuRef}>
+                <summary aria-label="打开刷新菜单" className="secondary-button refresh-menu-trigger">
+                  <ChevronDown aria-hidden="true" size={16} />
+                </summary>
+                <div className="refresh-menu" role="menu">
+                  <button onClick={() => void clearImageCache()} role="menuitem" type="button">
+                    <Eraser aria-hidden="true" size={16} />
+                    清除缓存
                   </button>
-                )}
-                <button className="secondary-button" onClick={() => void signOut()} type="button">
-                  <LogOut aria-hidden="true" size={16} />
-                  退出管理
-                </button>
-              </>
-            ) : !loadingAdmin ? (
-              <Link className="secondary-button" href="/admin/login">
-                <LogIn aria-hidden="true" size={16} />
-                管理员登录
-              </Link>
-            ) : null}
+                </div>
+              </details>
+            </div>
           </div>
         </header>
-
-        {notice ? (
-          <div className={`notice ${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
-            {notice.text}
-          </div>
-        ) : null}
 
         {!selectedAlbum ? (
           <div className="album-gallery" aria-busy={loadingAlbums}>
@@ -510,65 +581,93 @@ export function GalleryApp() {
                   <span className="album-cover">
                     {album.cover_image ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img alt="" loading="lazy" src={`/api/images/${album.cover_image.id}/asset`} />
+                      <img alt="" loading="lazy" src={imageAssetUrl(album.cover_image.id, imageCacheVersion)} />
                     ) : (
                       <Folder aria-hidden="true" size={34} />
                     )}
                   </span>
                   <span className="album-card-body">
                     <strong>{album.title}</strong>
-                  <small>{album.image_count} 张图片 · {formatBytes(album.total_size_bytes)}</small>
-                  <span className={`status-pill ${album.is_public ? "public" : "private"}`}>
-                    {album.is_public ? (
-                      <Globe2 aria-hidden="true" size={13} />
-                    ) : (
-                      <Lock aria-hidden="true" size={13} />
-                    )}
-                    {album.is_public ? "公开" : "非公开"}
+                    <small>{album.image_count} 张图片 · {formatBytes(album.total_size_bytes)}</small>
+                    <span className="album-badges">
+                      <span className={`type-pill ${album.album_type}`}>
+                        {album.album_type === "setting" ? (
+                          <BookOpen aria-hidden="true" size={13} />
+                        ) : (
+                          <Folder aria-hidden="true" size={13} />
+                        )}
+                        {albumTypeLabel(album.album_type)}
+                      </span>
+                      <span className={`status-pill ${album.is_public ? "public" : "private"}`}>
+                        {album.is_public ? (
+                          <Globe2 aria-hidden="true" size={13} />
+                        ) : (
+                          <Lock aria-hidden="true" size={13} />
+                        )}
+                        {album.is_public ? "公开" : "非公开"}
+                      </span>
+                    </span>
+                    {album.description ? <span>{album.description}</span> : null}
                   </span>
-                  {album.description ? <span>{album.description}</span> : null}
-                </span>
                 </button>
               ))
             ) : (
               <div className="empty-gallery">
                 <Folder aria-hidden="true" size={34} />
-                <h3>{authenticated ? "创建第一个相册" : "暂无公开相册"}</h3>
-                <p>{authenticated ? "新建相册后即可上传和管理图片。" : "管理员发布公开相册后会显示在这里。"}</p>
+                <h3>{emptyGalleryTitle(albumTypeFilter, authenticated)}</h3>
+                <p>{authenticated ? "新建相册或设定集后即可上传和管理图片。" : "管理员发布公开内容后会显示在这里。"}</p>
                 {authenticated ? (
                   <button className="primary-button" onClick={() => setAlbumCreateOpen(true)} type="button">
-                    新建相册
+                    新建内容
                   </button>
                 ) : null}
               </div>
             )}
           </div>
         ) : (
-          loadingImages ? (
-            <div className={`image-grid image-size-${imageSize}`} aria-busy="true">
-              {Array.from({ length: 8 }).map((_, index) => <div className="image-skeleton" key={index} />)}
-            </div>
-          ) : images.length > 0 ? (
-            <ImageMasonry
-              formatSize={formatBytes}
-              images={images}
-              imageSize={imageSize}
-              onOpenImage={openImage}
-            />
-          ) : (
-            <div className={`image-grid image-size-${imageSize}`} aria-busy="false">
-              <div className="empty-gallery">
-                <ImageIcon aria-hidden="true" size={34} />
-                <h3>最近上传</h3>
-                <p>{authenticated ? "这个相册还没有图片，可以从当前相册上传。" : "这个相册目前没有公开图片。"}</p>
-                {authenticated ? (
-                  <Link className="primary-button" href={`/album-upload?albumId=${encodeURIComponent(selectedAlbum.id)}`}>
-                    上传图片
-                  </Link>
-                ) : null}
+          <>
+            {selectedAlbum.album_type === "setting" ? (
+              <AlbumFieldsEditor
+                albumId={selectedAlbum.id}
+                authenticated={authenticated}
+                key={selectedAlbum.id}
+                onUpdated={() => {
+                  const now = new Date().toISOString();
+                  setAlbums((current) =>
+                    current.map((album) =>
+                      album.id === selectedAlbum.id ? { ...album, updated_at: now } : album
+                    )
+                  );
+                }}
+              />
+            ) : null}
+            {loadingImages ? (
+              <div className={`image-grid image-size-${imageSize}`} aria-busy="true">
+                {Array.from({ length: 8 }).map((_, index) => <div className="image-skeleton" key={index} />)}
               </div>
-            </div>
-          )
+            ) : images.length > 0 ? (
+              <ImageMasonry
+                cacheVersion={imageCacheVersion}
+                formatSize={formatBytes}
+                images={images}
+                imageSize={imageSize}
+                onOpenImage={openImage}
+              />
+            ) : (
+              <div className={`image-grid image-size-${imageSize}`} aria-busy="false">
+                <div className="empty-gallery">
+                  <ImageIcon aria-hidden="true" size={34} />
+                  <h3>最近上传</h3>
+                  <p>{authenticated ? "这个内容还没有图片，可以从当前页面上传。" : "这里目前没有公开图片。"}</p>
+                  {authenticated ? (
+                    <Link className="primary-button" href={`/album-upload?albumId=${encodeURIComponent(selectedAlbum.id)}`}>
+                      上传图片
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </section>
 
@@ -583,15 +682,38 @@ export function GalleryApp() {
           >
             <div className="dialog-heading">
               <div className="panel-heading">
-                <p className="section-label">相册</p>
-                <h2 id="album-create-title">新建相册</h2>
+                <p className="section-label">内容管理</p>
+                <h2 id="album-create-title">新建内容</h2>
               </div>
-              <button aria-label="关闭新建相册" className="icon-button" onClick={closeAlbumCreate} type="button">
+              <button aria-label="关闭新建内容" className="icon-button" onClick={closeAlbumCreate} type="button">
                 <X aria-hidden="true" size={19} />
               </button>
             </div>
+            <fieldset className="content-type-fieldset">
+              <legend>类型</legend>
+              <div className="content-type-selector">
+                {([
+                  ["album", "相册", "适合旅行、活动和摄影作品"],
+                  ["setting", "设定集", "包含可编辑的角色基础信息"],
+                ] as const).map(([value, label, description]) => (
+                  <label className={albumCreate.albumType === value ? "selected" : ""} key={value}>
+                    <input
+                      checked={albumCreate.albumType === value}
+                      name="albumType"
+                      onChange={() =>
+                        setAlbumCreate((current) => ({ ...current, albumType: value }))
+                      }
+                      type="radio"
+                      value={value}
+                    />
+                    <strong>{label}</strong>
+                    <span>{description}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
             <label>
-              相册名称
+              名称
               <input
                 autoFocus
                 onChange={(event) =>
@@ -603,7 +725,7 @@ export function GalleryApp() {
               />
             </label>
             <label>
-              相册描述
+              描述
               <textarea
                 onChange={(event) =>
                   setAlbumCreate((current) => ({ ...current, description: event.target.value }))
@@ -621,16 +743,21 @@ export function GalleryApp() {
                 }
                 type="checkbox"
               />
-              公开相册
+              公开展示
             </label>
-            {!albumCreate.isPublic ? <p className="empty-copy">非公开相册仅管理员登录后可见。</p> : null}
+            {!albumCreate.isPublic ? <p className="empty-copy">非公开内容仅管理员登录后可见。</p> : null}
+            {albumCreate.albumType === "setting" ? (
+              <p className="setting-create-hint">
+                创建后可在详情页维护名字、物种、性别、性格等基础信息。
+              </p>
+            ) : null}
             <div className="button-row">
               <button className="secondary-button" disabled={mutating} onClick={closeAlbumCreate} type="button">
                 取消
               </button>
               <button className="primary-button" disabled={mutating} type="submit">
                 {mutating ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <Plus aria-hidden="true" size={16} />}
-                创建相册
+                创建{albumTypeLabel(albumCreate.albumType)}
               </button>
             </div>
           </form>
@@ -648,8 +775,8 @@ export function GalleryApp() {
           >
             <div className="dialog-heading">
               <div className="panel-heading">
-                <p className="section-label">相册</p>
-                <h2 id="album-edit-title">编辑相册信息</h2>
+                <p className="section-label">{albumTypeLabel(selectedAlbum.album_type)}</p>
+                <h2 id="album-edit-title">编辑标题与描述</h2>
               </div>
               <button aria-label="关闭相册编辑" className="icon-button" onClick={closeAlbumEdit} type="button">
                 <X aria-hidden="true" size={19} />
@@ -681,9 +808,9 @@ export function GalleryApp() {
               }
               type="checkbox"
             />
-            公开相册
+            公开展示
           </label>
-          {!albumEdit.isPublic ? <p className="empty-copy">非公开相册仅管理员登录后可见。</p> : null}
+          {!albumEdit.isPublic ? <p className="empty-copy">非公开内容仅管理员登录后可见。</p> : null}
           <div className="button-row">
             <button className="secondary-button danger" disabled={mutating} onClick={removeAlbum} type="button">
               <Trash2 aria-hidden="true" size={16} />
@@ -726,18 +853,31 @@ export function GalleryApp() {
               <img
                 alt={selectedImage.description || "相册图片"}
                 height={selectedImage.height ?? undefined}
-                src={`/api/images/${selectedImage.id}/asset`}
+                src={imageAssetUrl(selectedImage.id, imageCacheVersion)}
                 width={selectedImage.width ?? undefined}
               />
             </div>
             <div className="image-dialog-editor">
               <div className="description-heading">
                 <strong>图片描述</strong>
-                {authenticated && !imageEditing ? (
-                  <button className="secondary-button compact-button" onClick={() => setImageEditing(true)} type="button">
-                    <Pencil aria-hidden="true" size={15} />
-                    编辑
-                  </button>
+                {authenticated ? (
+                  <div className="image-detail-actions">
+                    <button
+                      className="secondary-button compact-button danger"
+                      disabled={mutating}
+                      onClick={removeImage}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" size={15} />
+                      删除
+                    </button>
+                    {!imageEditing ? (
+                      <button className="secondary-button compact-button" onClick={() => setImageEditing(true)} type="button">
+                        <Pencil aria-hidden="true" size={15} />
+                        编辑
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
               {imageEditing ? (
@@ -754,10 +894,6 @@ export function GalleryApp() {
                     />
                   </label>
                   <div className="button-row">
-                    <button className="secondary-button danger" disabled={mutating} onClick={removeImage} type="button">
-                      <Trash2 aria-hidden="true" size={16} />
-                      删除
-                    </button>
                     <button
                       className="secondary-button"
                       disabled={mutating}
@@ -803,6 +939,25 @@ function formatBytes(bytes: number): string {
   }
 
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function albumTypeLabel(albumType: AlbumType): string {
+  return albumType === "setting" ? "设定集" : "相册";
+}
+
+function emptyGalleryTitle(filter: AlbumTypeFilter, authenticated: boolean): string {
+  if (filter === "setting") {
+    return authenticated ? "创建第一个设定集" : "暂无公开设定集";
+  }
+  if (filter === "album") {
+    return authenticated ? "创建第一个相册" : "暂无公开相册";
+  }
+  return authenticated ? "创建第一个内容" : "暂无公开内容";
+}
+
+function imageAssetUrl(imageId: string, cacheVersion: number): string {
+  const path = `/api/images/${imageId}/asset`;
+  return cacheVersion > 0 ? `${path}?cache=${cacheVersion}` : path;
 }
 
 function formatDimensions(image: GalleryImage): string {

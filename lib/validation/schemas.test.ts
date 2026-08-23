@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   albumCreateSchema,
+  albumFieldsUpdateSchema,
   imageDuplicateCheckSchema,
   imageUpdateSchema
 } from "@/lib/validation/schemas";
@@ -10,8 +11,24 @@ describe("gallery schemas", () => {
     expect(albumCreateSchema.parse({ title: "  旅行  ", description: "  夏天  " })).toEqual({
       title: "旅行",
       description: "夏天",
+      albumType: "album",
       isPublic: true
     });
+  });
+
+  it("accepts setting collections and trims flexible base fields", () => {
+    expect(albumCreateSchema.parse({ title: "角色", albumType: "setting" })).toMatchObject({
+      albumType: "setting"
+    });
+    expect(albumFieldsUpdateSchema.parse({
+      fields: [{ label: "  物种  ", value: "  雪豹  " }]
+    })).toEqual({ fields: [{ label: "物种", value: "雪豹" }] });
+  });
+
+  it("rejects blank setting collection field labels", () => {
+    expect(() => albumFieldsUpdateSchema.parse({
+      fields: [{ label: "  ", value: "内容" }]
+    })).toThrow("字段名称不能为空");
   });
 
   it("allows administrators to create a private album without a visitor key", () => {

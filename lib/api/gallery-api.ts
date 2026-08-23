@@ -7,9 +7,11 @@ import {
   getAlbum,
   getImage,
   listAlbumImagesForDelete,
+  listAlbumFields,
   listAlbums,
   listImageIdentities,
   listImages,
+  replaceAlbumFields,
   toGalleryImage,
   updateAlbum,
   updateImage
@@ -42,6 +44,7 @@ type ApiRoute =
   | { kind: "admin-session" }
   | { kind: "albums" }
   | { kind: "album"; albumId: string }
+  | { kind: "album-fields"; albumId: string }
   | { kind: "album-images"; albumId: string }
   | { kind: "album-images-check"; albumId: string }
   | { kind: "image"; imageId: string }
@@ -66,6 +69,8 @@ export async function handleGalleryApiRequest(
         return handleAlbums(request, env);
       case "album":
         return handleAlbum(request, env, route.albumId);
+      case "album-fields":
+        return handleAlbumFields(request, env, route.albumId);
       case "album-images":
         return handleAlbumImages(request, env, route.albumId);
       case "album-images-check":
@@ -100,6 +105,9 @@ function matchApiRoute(pathname: string): ApiRoute | null {
   }
   if (parts.length === 3 && parts[1] === "albums") {
     return { kind: "album", albumId: parts[2] };
+  }
+  if (parts.length === 4 && parts[1] === "albums" && parts[3] === "fields") {
+    return { kind: "album-fields", albumId: parts[2] };
   }
   if (parts.length === 4 && parts[1] === "albums" && parts[3] === "images") {
     return { kind: "album-images", albumId: parts[2] };
@@ -177,12 +185,43 @@ async function handleAlbums(request: Request, env: CloudflareEnv): Promise<Respo
       id: crypto.randomUUID(),
       title: input.title,
       description: input.description,
+      albumType: input.albumType,
       isPublic: input.isPublic,
       now
     });
     return dataResponse(album, 201);
   }
   return methodNotAllowed(["GET", "POST"]);
+}
+
+async function handleAlbumFields(
+  request: Request,
+  env: CloudflareEnv,
+  albumId: string
+): Promise<Response> {
+  const album = await requireExistingAlbum(env, albumId);
+
+  if (request.method === "GET") {
+    await requireAlbumReadAccess(request, env, album);
+    if (album.album_type !== "setting") {
+      throw new HttpError(404, "设定集不存在", "setting_not_found");
+    }
+    return dataResponse(await listAlbumFields(env.DB, albumId));
+  }
+
+  if (request.method === "PUT") {
+    await requireAdmin(request, env);
+    if (album.album_type !== "setting") {
+      throw new HttpError(400, "只有设定集可以维护基础信息", "invalid_album_type");
+    }
+    const { albumFieldsUpdateSchema } = await import("@/lib/validation/schemas");
+    const input = albumFieldsUpdateSchema.parse(await request.json());
+    return dataResponse(
+      await replaceAlbumFields(env.DB, albumId, input.fields, new Date().toISOString())
+    );
+  }
+
+  return methodNotAllowed(["GET", "PUT"]);
 }
 
 async function handleAlbum(
@@ -394,14 +433,14 @@ async function getImageAsset(
   const rangeRequested = request.headers.has("range");
   const object = await env.GALLERY_BUCKET.get(
     image.r2_key,
-    rangeRequested ? { range: request.headers } : undefined
+    rangeRequested ? { range: parseRangeHeader(request.headers.get("range")) } : undefined
   );
   if (!object || !("body" in object)) {
     throw new HttpError(404, "图片文件不存在", "image_object_not_found");
   }
 
   const headers = new Headers();
-  object.writeHttpMetadata(headers);
+  applyR2HttpMetadata(headers, object.httpMetadata);
   headers.set("content-type", object.httpMetadata?.contentType ?? image.content_type);
   headers.set("etag", object.httpEtag);
   headers.set("accept-ranges", "bytes");
@@ -489,6 +528,26 @@ function noStore(response: Response): Response {
   return response;
 }
 
+function applyR2HttpMetadata(headers: Headers, metadata?: R2HTTPMetadata): void {
+  if (!metadata) {
+    return;
+  }
+
+  const values: Array<[string, string | undefined]> = [
+    ["content-type", metadata.contentType],
+    ["content-language", metadata.contentLanguage],
+    ["content-disposition", metadata.contentDisposition],
+    ["content-encoding", metadata.contentEncoding],
+    ["cache-control", metadata.cacheControl],
+    ["expires", metadata.cacheExpiry?.toUTCString()]
+  ];
+  for (const [name, value] of values) {
+    if (value) {
+      headers.set(name, value);
+    }
+  }
+}
+
 function parseRequiredInteger(value: string | null, message: string): number {
   const parsed = Number(value);
   if (!value || !Number.isSafeInteger(parsed)) {
@@ -518,6 +577,32 @@ function normalizeRange(range: R2Range, objectSize: number): { offset: number; l
         ? range.length
         : Math.max(0, objectSize - offset)
   };
+}
+
+function parseRangeHeader(value: string | null): R2Range {
+  const match = value?.match(/^bytes=(\d*)-(\d*)$/i);
+  if (!match || (!match[1] && !match[2])) {
+    throw new HttpError(416, "图片分段范围无效", "invalid_range");
+  }
+
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) {
+      throw new HttpError(416, "图片分段范围无效", "invalid_range");
+    }
+    return { suffix };
+  }
+
+  const offset = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : null;
+  if (
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    (end !== null && (!Number.isSafeInteger(end) || end < offset))
+  ) {
+    throw new HttpError(416, "图片分段范围无效", "invalid_range");
+  }
+  return end === null ? { offset } : { offset, length: end - offset + 1 };
 }
 
 function etagMatches(ifNoneMatch: string | null, etag: string): boolean {

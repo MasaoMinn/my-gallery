@@ -4,6 +4,7 @@ const album = {
   id: "album-1",
   title: "测试相册",
   description: "相册描述",
+  album_type: "album" as const,
   is_public: true,
   cover_image_id: null,
   created_at: "2026-01-01T00:00:00.000Z",
@@ -48,13 +49,13 @@ test("visitors can browse public image details but cannot see management control
   await mockGallery(page);
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "My Gallery" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cloudflare Album" })).toBeVisible();
   await expect(page.getByRole("link", { name: "管理员登录" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "新建相册" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "新建内容" })).toHaveCount(0);
   await expect(page.getByLabel("相册排序字段")).toHaveValue("updatedAt");
 
   await page.getByRole("button", { name: /测试相册/ }).click();
-  await expect(page.getByRole("button", { name: "编辑相册信息" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "编辑标题与描述" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "上传图片" })).toHaveCount(0);
   await expect(page.locator("aside")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "中，桌面端一行 5 张图" })).toHaveAttribute("aria-pressed", "true");
@@ -69,6 +70,7 @@ test("visitors can browse public image details but cannot see management control
   await expect(dialog.getByText("1200 × 800 px")).toBeVisible();
   await expect(dialog.getByText("JPEG")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "编辑" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "删除" })).toHaveCount(0);
   await expect(dialog).not.toContainText("hidden.jpg");
 });
 
@@ -123,6 +125,54 @@ test("wide images span two columns without refetching image assets when the size
   expect(assetRequests).toEqual(requestsBeforeResize);
 });
 
+test("refresh dropdown can invalidate image URLs and reload the current album", async ({ page }) => {
+  let albumRequests = 0;
+  let imageListRequests = 0;
+  const assetUrls: string[] = [];
+
+  await mockSession(page, false);
+  await page.route("**/api/albums", (route) => {
+    albumRequests += 1;
+    return route.fulfill({ json: { data: [album] } });
+  });
+  await page.route("**/api/albums/album-1/images", (route) => {
+    imageListRequests += 1;
+    return route.fulfill({ json: { data: [image] } });
+  });
+  await page.route("**/api/images/image-1/asset**", (route) => {
+    assetUrls.push(route.request().url());
+    return route.fulfill({
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64"
+      ),
+      contentType: "image/png"
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /测试相册/ }).click();
+  await expect.poll(() => assetUrls.length).toBeGreaterThan(0);
+
+  const albumRequestsBefore = albumRequests;
+  const imageRequestsBefore = imageListRequests;
+  const assetRequestsBefore = assetUrls.length;
+  await page.getByLabel("打开刷新菜单").click();
+  await expect(page.getByRole("menuitem", { name: "清除缓存" })).toBeVisible();
+  await page.getByRole("heading", { name: "Cloudflare Album" }).hover();
+  await expect(page.getByRole("menuitem", { name: "清除缓存" })).toBeHidden();
+  await page.getByLabel("打开刷新菜单").click();
+  await page.getByRole("menuitem", { name: "清除缓存" }).click();
+
+  const cacheToast = page.locator('[data-sonner-toast][data-type="success"]');
+  await expect(cacheToast).toContainText("图片缓存已清除");
+  await expect(page.locator(".image-card img")).toHaveAttribute("src", /\?cache=\d+$/);
+  await expect.poll(() => albumRequests).toBeGreaterThan(albumRequestsBefore);
+  await expect.poll(() => imageListRequests).toBeGreaterThan(imageRequestsBefore);
+  await expect.poll(() => assetUrls.length).toBeGreaterThan(assetRequestsBefore);
+  await expect(cacheToast).toBeHidden({ timeout: 6_000 });
+});
+
 test("administrators edit albums and explicitly enter image description edit mode", async ({ page }) => {
   await mockSession(page, true);
   await mockGallery(page);
@@ -136,11 +186,15 @@ test("administrators edit albums and explicitly enter image description edit mod
   });
 
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "新建相册" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新建内容" })).toBeVisible();
   await page.getByRole("button", { name: /测试相册/ }).click();
 
-  await page.getByRole("button", { name: "编辑相册信息" }).click();
-  const albumDialog = page.getByRole("dialog", { name: "编辑相册信息" });
+  const editAlbumButton = page.getByRole("button", { name: "编辑标题与描述" });
+  await expect(editAlbumButton).toBeVisible();
+  await expect(editAlbumButton).toHaveText("");
+  await expect(editAlbumButton).toHaveAttribute("title", "编辑标题与描述");
+  await editAlbumButton.click();
+  const albumDialog = page.getByRole("dialog", { name: "编辑标题与描述" });
   await albumDialog.getByLabel("名称").fill("更新后的相册");
   await albumDialog.getByRole("button", { name: "保存" }).click();
   await expect(page.getByRole("heading", { name: "更新后的相册" })).toBeVisible();
@@ -148,6 +202,7 @@ test("administrators edit albums and explicitly enter image description edit mod
   await page.locator(".image-card").click();
   const imageDialog = page.getByRole("dialog", { name: "查看图片" });
   await expect(imageDialog.getByLabel("描述")).toHaveCount(0);
+  await expect(imageDialog.getByRole("button", { name: "删除" })).toBeVisible();
   await imageDialog.getByRole("button", { name: "编辑" }).click();
   await imageDialog.getByLabel("描述").fill("更新后的图片描述");
   await imageDialog.getByRole("button", { name: "保存" }).click();
@@ -181,15 +236,15 @@ test("an administrator signs in once and returns to the requested management pag
   await page.getByRole("button", { name: "登录", exact: true }).click();
 
   await expect(page).toHaveURL(/\/upload$/);
-  await expect(page.getByRole("heading", { name: "创建一个新的相册" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "创建相册或设定集" })).toBeVisible();
 });
 
 test("authenticated upload page does not mix in image upload controls", async ({ page }) => {
   await mockSession(page, true);
   await page.goto("/upload");
 
-  await expect(page.getByRole("heading", { name: "创建一个新的相册" })).toBeVisible();
-  await expect(page.getByLabel("相册名称")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "创建相册或设定集" })).toBeVisible();
+  await expect(page.getByLabel("名称")).toBeVisible();
   await expect(page.getByRole("heading", { name: "上传图片", exact: true })).toHaveCount(0);
 });
 
@@ -224,7 +279,7 @@ test("image upload reports progress and a successful result", async ({ page }) =
     name: "test.jpg"
   });
 
-  await expect(page.getByRole("status")).toContainText("1 张图片已上传");
+  await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("1 张图片已上传");
   await expect(page.getByLabel("全部图片上传进度")).toHaveJSProperty("value", 100);
   await expect(page.getByText("test.jpg")).toBeVisible();
   await expect(page.getByText(/已完成/)).toBeVisible();
@@ -259,7 +314,7 @@ test("image upload keeps server errors visible per item", async ({ page }) => {
     name: "large.jpg"
   });
 
-  await expect(page.locator(".notice.error")).toContainText("1 张图片上传失败");
+  await expect(page.locator('[data-sonner-toast][data-type="error"]')).toContainText("1 张图片上传失败");
   await expect(page.getByText("图片超过上传大小限制")).toBeVisible();
   await expect(page.locator(".upload-file-item.error")).toContainText("上传失败");
 });
@@ -288,38 +343,137 @@ test("existing duplicate images are skipped before file upload", async ({ page }
     name: "existing.jpg"
   });
 
-  await expect(page.getByRole("status")).toContainText("均已存在，已跳过上传");
+  await expect(page.locator('[data-sonner-toast][data-type="info"]')).toContainText("均已存在，已跳过上传");
   await expect(page.locator(".upload-file-item.skipped")).toContainText("重复图片，已跳过");
   expect(uploadRequests).toBe(0);
 });
 
-test("administrators create an album in a modal and enter it immediately", async ({ page }) => {
+test("administrators choose a setting collection type and enter it immediately", async ({ page }) => {
   await mockSession(page, true);
+  let requestedType = "";
   const createdAlbum = {
     ...album,
-    id: "album-2",
-    title: "新建的相册",
-    description: "新相册描述",
+    id: "setting-2",
+    title: "新建的设定集",
+    description: "设定集描述",
+    album_type: "setting" as const,
     image_count: 0,
     total_size_bytes: 0
   };
   await page.route("**/api/albums", async (route) => {
     if (route.request().method() === "POST") {
+      requestedType = (route.request().postDataJSON() as { albumType: string }).albumType;
       await route.fulfill({ json: { data: createdAlbum } });
       return;
     }
     await route.fulfill({ json: { data: [album] } });
   });
+  await page.route("**/api/albums/setting-2/images", (route) =>
+    route.fulfill({ json: { data: [] } })
+  );
+  await page.route("**/api/albums/setting-2/fields", (route) =>
+    route.fulfill({ json: { data: [] } })
+  );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "新建相册", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "新建相册" });
-  await dialog.getByLabel("相册名称").fill("新建的相册");
-  await dialog.getByLabel("相册描述").fill("新相册描述");
-  await dialog.getByRole("button", { name: "创建相册" }).click();
+  await page.getByRole("button", { name: "新建内容", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "新建内容" });
+  await dialog.getByText("设定集", { exact: true }).click();
+  await dialog.getByLabel("名称").fill("新建的设定集");
+  await dialog.getByLabel("描述").fill("设定集描述");
+  await dialog.getByRole("button", { name: "创建设定集" }).click();
 
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("heading", { name: "新建的相册" })).toBeVisible();
+  expect(requestedType).toBe("setting");
+  await expect(page.getByRole("heading", { name: "新建的设定集" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "基础信息" })).toBeVisible();
   await expect(page.locator("header").getByRole("link", { name: "上传图片" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+});
+
+test("homepage filters setting collections and visitors see read-only base information", async ({ page }) => {
+  const settingAlbum = {
+    ...album,
+    id: "setting-1",
+    title: "星野 澪",
+    description: "雪豹设定",
+    album_type: "setting" as const,
+    image_count: 0
+  };
+  const fields = [
+    { id: "field-1", album_id: settingAlbum.id, label: "名字", value: "星野 澪", sort_order: 0 },
+    { id: "field-2", album_id: settingAlbum.id, label: "物种", value: "雪豹", sort_order: 1 }
+  ];
+
+  await mockSession(page, false);
+  await page.route("**/api/albums", (route) =>
+    route.fulfill({ json: { data: [album, settingAlbum] } })
+  );
+  await page.route("**/api/albums/setting-1/images", (route) =>
+    route.fulfill({ json: { data: [] } })
+  );
+  await page.route("**/api/albums/setting-1/fields", (route) =>
+    route.fulfill({ json: { data: fields } })
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "设定集", exact: true }).click();
+  await expect(page.getByRole("button", { name: /测试相册/ })).toHaveCount(0);
+  await page.getByRole("button", { name: /星野 澪/ }).click();
+
+  await expect(page.getByRole("heading", { name: "基础信息" })).toBeVisible();
+  await expect(page.getByText("雪豹", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "编辑基础信息" })).toHaveCount(0);
+});
+
+test("administrators add, edit, and delete setting collection fields", async ({ page }) => {
+  const settingAlbum = {
+    ...album,
+    id: "setting-1",
+    title: "星野 澪",
+    album_type: "setting" as const,
+    image_count: 0
+  };
+  let fields = [
+    { id: "field-1", album_id: settingAlbum.id, label: "名字", value: "星野 澪", sort_order: 0 },
+    { id: "field-2", album_id: settingAlbum.id, label: "物种", value: "雪豹", sort_order: 1 }
+  ];
+  let savedFields: Array<{ label: string; value: string }> = [];
+
+  await mockSession(page, true);
+  await page.route("**/api/albums", (route) =>
+    route.fulfill({ json: { data: [settingAlbum] } })
+  );
+  await page.route("**/api/albums/setting-1/images", (route) =>
+    route.fulfill({ json: { data: [] } })
+  );
+  await page.route("**/api/albums/setting-1/fields", async (route) => {
+    if (route.request().method() === "PUT") {
+      savedFields = (route.request().postDataJSON() as { fields: typeof savedFields }).fields;
+      fields = savedFields.map((field, index) => ({
+        id: `saved-${index}`,
+        album_id: settingAlbum.id,
+        label: field.label,
+        value: field.value,
+        sort_order: index
+      }));
+    }
+    await route.fulfill({ json: { data: fields } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /星野 澪/ }).click();
+  await page.getByRole("button", { name: "编辑基础信息" }).click();
+  await page.getByRole("button", { name: "删除第 1 项基础信息" }).click();
+  await page.getByRole("button", { name: "添加信息" }).click();
+  await page.getByLabel("第 2 项字段").fill("性格");
+  await page.getByLabel("第 2 项内容").fill("安静、敏锐");
+  await page.getByRole("button", { name: "保存更改" }).click();
+
+  await expect(page.locator('[data-sonner-toast][data-type="success"]')).toContainText("基础信息已保存");
+  expect(savedFields).toEqual([
+    { label: "物种", value: "雪豹" },
+    { label: "性格", value: "安静、敏锐" }
+  ]);
+  await expect(page.getByText("安静、敏锐", { exact: true })).toBeVisible();
 });

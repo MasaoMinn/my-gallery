@@ -28,8 +28,7 @@ export async function putImageObject(
     sizeBytes: number;
   }
 ): Promise<R2Object> {
-  const fixedLengthStream = new FixedLengthStream(image.sizeBytes);
-  const putPromise = bucket.put(key, fixedLengthStream.readable, {
+  const options: R2PutOptions = {
     httpMetadata: {
       contentType: image.contentType,
       cacheControl: "public,max-age=31536000,immutable"
@@ -39,7 +38,24 @@ export async function putImageObject(
       imageId: image.imageId,
       originalFilename: image.filename
     }
-  });
+  };
+
+  if (typeof FixedLengthStream === "undefined") {
+    // Next.js development runs in Node, where Miniflare's FixedLengthStream
+    // global is unavailable. R2 still requires a body with a known length.
+    const localBody = await new Response(body).arrayBuffer();
+    if (localBody.byteLength !== image.sizeBytes) {
+      throw new Error("Image stream length does not match the declared size");
+    }
+    const object = await bucket.put(key, localBody, options);
+    if (!object) {
+      throw new Error("R2 rejected the image upload");
+    }
+    return object;
+  }
+
+  const fixedLengthStream = new FixedLengthStream(image.sizeBytes);
+  const putPromise = bucket.put(key, fixedLengthStream.readable, options);
   const [, object] = await Promise.all([
     body.pipeTo(fixedLengthStream.writable),
     putPromise

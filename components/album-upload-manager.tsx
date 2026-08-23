@@ -20,11 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-
-type Notice = {
-  tone: "success" | "error" | "info";
-  text: string;
-};
+import { toast } from "sonner";
 
 type UploadItem = {
   id: string;
@@ -51,7 +47,6 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
   const [album, setAlbum] = useState<Album | null>(null);
   const [recentImages, setRecentImages] = useState<GalleryImage[]>([]);
   const [uploadDescription, setUploadDescription] = useState("");
-  const [notice, setNotice] = useState<Notice | null>(null);
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
@@ -70,10 +65,7 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
   }, [uploadItems]);
 
   function showError(error: unknown) {
-    setNotice({
-      tone: "error",
-      text: error instanceof Error ? error.message : "操作失败"
-    });
+    toast.error(error instanceof Error ? error.message : "操作失败", { duration: 6_000 });
   }
 
   useEffect(() => {
@@ -156,7 +148,7 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
     });
     const items = entries.map((entry) => entry.item);
     setUploadItems(items);
-    setNotice({ tone: "info", text: `正在检查 ${files.length} 张图片是否重复` });
+    const progressToastId = toast.loading(`正在检查 ${files.length} 张图片是否重复`);
     setMutating(true);
 
     let succeeded = 0;
@@ -189,7 +181,10 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
           for (const { item } of candidates) {
             updateUploadItem(item.id, { status: "error", error: message });
           }
-          setNotice({ tone: "error", text: `无法检查重复图片：${message}` });
+          toast.error(`无法检查重复图片：${message}`, {
+            duration: 6_000,
+            id: progressToastId
+          });
           return;
         }
 
@@ -260,21 +255,21 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
       }
 
       if (failed === 0 && succeeded > 0) {
-        setNotice({
-          tone: "success",
-          text: skipped > 0
+        toast.success(
+          skipped > 0
             ? `${succeeded} 张上传成功，${skipped} 张重复图片已跳过`
-            : `${succeeded} 张图片已上传到「${album?.title ?? "当前相册"}」`
-        });
+            : `${succeeded} 张图片已上传到「${album?.title ?? "当前相册"}」`,
+          { id: progressToastId }
+        );
       } else if (failed === 0) {
-        setNotice({ tone: "info", text: `${skipped} 张图片均已存在，已跳过上传` });
+        toast.info(`${skipped} 张图片均已存在，已跳过上传`, { id: progressToastId });
       } else {
-        setNotice({
-          tone: "error",
-          text: succeeded === 0 && skipped === 0
+        toast.error(
+          succeeded === 0 && skipped === 0
             ? `${failed} 张图片上传失败，请查看下方详情`
-            : `${succeeded} 张成功，${skipped} 张重复已跳过，${failed} 张失败，请查看详情`
-        });
+            : `${succeeded} 张成功，${skipped} 张重复已跳过，${failed} 张失败，请查看详情`,
+          { duration: 6_000, id: progressToastId }
+        );
       }
     } finally {
       setMutating(false);
@@ -304,12 +299,6 @@ export function AlbumUploadManager({ albumId }: { albumId: string }) {
           刷新
         </button>
       </header>
-
-      {notice ? (
-        <div className={`notice ${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
-          {notice.text}
-        </div>
-      ) : null}
 
       <section className="upload-layout">
         <div className="upload-card">

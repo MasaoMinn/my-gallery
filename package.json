@@ -23,6 +23,7 @@
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "sonner": "^2.0.8",
     "zod": "latest"
   },
   "devDependencies": {
@@ -33,8 +34,8 @@
     "@types/react-dom": "latest",
     "eslint": "^9.39.4",
     "eslint-config-next": "latest",
-    "typescript": "latest",
+    "typescript": "6.0.3",
     "vitest": "latest",
-    "wrangler": "4.108.0"
+    "wrangler": "4.125.0"
   }
 }

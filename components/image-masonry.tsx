@@ -9,6 +9,7 @@ import {
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type ImageMasonryProps = {
+  cacheVersion: number;
   formatSize: (bytes: number) => string;
   imageSize: ImageSize;
   images: GalleryImage[];
@@ -18,7 +19,7 @@ type ImageMasonryProps = {
 const DESKTOP_GAP = 14;
 const MOBILE_GAP = 12;
 
-export function ImageMasonry({ formatSize, imageSize, images, onOpenImage }: ImageMasonryProps) {
+export function ImageMasonry({ cacheVersion, formatSize, imageSize, images, onOpenImage }: ImageMasonryProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);
   const [metrics, setMetrics] = useState({ containerWidth: 0, viewportWidth: 0 });
@@ -106,7 +107,7 @@ export function ImageMasonry({ formatSize, imageSize, images, onOpenImage }: Ima
               alt={image.description || "相册图片"}
               height={image.height ?? undefined}
               loading="lazy"
-              src={`/api/images/${image.id}/asset`}
+              src={imageAssetUrl(image.id, cacheVersion)}
               width={image.width ?? undefined}
             />
             <span className="image-overlay">
@@ -118,4 +119,9 @@ export function ImageMasonry({ formatSize, imageSize, images, onOpenImage }: Ima
       })}
     </div>
   );
+}
+
+function imageAssetUrl(imageId: string, cacheVersion: number): string {
+  const path = `/api/images/${imageId}/asset`;
+  return cacheVersion > 0 ? `${path}?cache=${cacheVersion}` : path;
 }
