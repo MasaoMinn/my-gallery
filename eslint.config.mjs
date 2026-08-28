@@ -5,7 +5,13 @@ const config = [
   ...nextVitals,
   ...nextTypescript,
   {
-    ignores: [".next/**", ".open-next/**", ".wrangler/**", "cloudflare-env.d.ts"]
+    ignores: [
+      ".next/**",
+      ".open-next/**",
+      ".wrangler/**",
+      ".wrangler-dry-run/**",
+      "cloudflare-env.d.ts"
+    ]
   }
 ];
 

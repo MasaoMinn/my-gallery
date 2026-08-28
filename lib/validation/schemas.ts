@@ -1,4 +1,17 @@
 import { z } from "zod";
+import {
+  ALBUM_ROUTE_ID_PATTERN,
+  RESERVED_ALBUM_ROUTE_IDS
+} from "@/lib/albums/route-id";
+
+export const albumRouteIdSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1, "路由 ID 不能为空")
+  .max(64, "路由 ID 最多 64 个字符")
+  .regex(ALBUM_ROUTE_ID_PATTERN, "路由 ID 只能包含小写字母、数字和单个连字符")
+  .refine((routeId) => !RESERVED_ALBUM_ROUTE_IDS.has(routeId), "该路由 ID 为系统保留地址");
 
 export const albumCreateSchema = z.object({
   title: z.string().trim().min(1, "相册标题不能为空").max(120, "相册标题过长"),
@@ -11,6 +24,7 @@ export const albumUpdateSchema = z
   .object({
     title: z.string().trim().min(1, "相册标题不能为空").max(120, "相册标题过长").optional(),
     description: z.string().trim().max(2_000, "相册描述过长").optional(),
+    routeId: albumRouteIdSchema.optional(),
     isPublic: z.boolean().optional(),
     coverImageId: z.string().trim().min(1).nullable().optional()
   })

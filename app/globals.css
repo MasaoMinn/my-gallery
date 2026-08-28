@@ -320,6 +320,15 @@ label {
   margin-top: 3px;
 }
 
+.field-hint {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .album-thumb {
   align-items: center;
   background: var(--surface-strong);
@@ -444,6 +453,64 @@ label {
   color: var(--accent);
   height: 34px;
   width: 34px;
+}
+
+.album-copy-button {
+  min-height: 34px;
+  padding: 0 11px;
+}
+
+.route-not-found-page {
+  align-items: center;
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+}
+
+.route-not-found-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: grid;
+  justify-items: center;
+  max-width: 520px;
+  padding: 40px;
+  text-align: center;
+  width: 100%;
+}
+
+.route-not-found-brand {
+  margin-bottom: 28px;
+}
+
+.route-not-found-brand strong {
+  font-size: 18px;
+}
+
+.route-not-found-code {
+  color: var(--accent);
+  font-size: 56px;
+  font-weight: 850;
+  line-height: 1;
+  margin: 0 0 14px;
+}
+
+.route-not-found-card h1 {
+  font-size: 24px;
+  margin: 0;
+}
+
+.route-not-found-card > p:not(.route-not-found-code) {
+  color: var(--muted);
+  line-height: 1.65;
+  margin: 12px 0 24px;
+  max-width: 390px;
+}
+
+.route-not-found-back {
+  min-width: 168px;
 }
 
 .icon-button.album-edit-button:hover {

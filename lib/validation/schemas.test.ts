@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   albumCreateSchema,
   albumFieldsUpdateSchema,
+  albumRouteIdSchema,
+  albumUpdateSchema,
   imageDuplicateCheckSchema,
   imageUpdateSchema
 } from "@/lib/validation/schemas";
@@ -35,6 +37,17 @@ describe("gallery schemas", () => {
     expect(albumCreateSchema.parse({ title: "私密", isPublic: false })).toMatchObject({
       title: "私密",
       isPublic: false
+    });
+  });
+
+  it("normalizes editable route ids and rejects invalid or reserved paths", () => {
+    expect(albumRouteIdSchema.parse("0123456789abcdef0123456789abcdef")).toHaveLength(32);
+    expect(albumRouteIdSchema.parse("  Summer-2026  ")).toBe("summer-2026");
+    expect(() => albumRouteIdSchema.parse("../admin")).toThrow();
+    expect(() => albumRouteIdSchema.parse("summer--2026")).toThrow();
+    expect(() => albumRouteIdSchema.parse("admin")).toThrow("该路由 ID 为系统保留地址");
+    expect(albumUpdateSchema.parse({ routeId: "  My-Album  " })).toEqual({
+      routeId: "my-album"
     });
   });
 

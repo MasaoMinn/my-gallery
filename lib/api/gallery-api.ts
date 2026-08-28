@@ -5,6 +5,7 @@ import {
   deleteImage,
   findDuplicateImage,
   getAlbum,
+  getAlbumByRouteId,
   getImage,
   listAlbumImagesForDelete,
   listAlbumFields,
@@ -16,6 +17,7 @@ import {
   updateAlbum,
   updateImage
 } from "@/lib/db/gallery";
+import { createAlbumRouteId } from "@/lib/albums/route-id";
 import {
   clearAdminSessionCookie,
   createAdminSession,
@@ -43,6 +45,7 @@ type ApiRoute =
   | { kind: "health" }
   | { kind: "admin-session" }
   | { kind: "albums" }
+  | { kind: "album-by-route"; routeId: string }
   | { kind: "album"; albumId: string }
   | { kind: "album-fields"; albumId: string }
   | { kind: "album-images"; albumId: string }
@@ -62,26 +65,28 @@ export async function handleGalleryApiRequest(
 
     switch (route.kind) {
       case "health":
-        return request.method === "GET" ? getHealth(env) : methodNotAllowed(["GET"]);
+        return request.method === "GET" ? await getHealth(env) : methodNotAllowed(["GET"]);
       case "admin-session":
-        return handleAdminSession(request, env);
+        return await handleAdminSession(request, env);
       case "albums":
-        return handleAlbums(request, env);
+        return await handleAlbums(request, env);
+      case "album-by-route":
+        return await handleAlbumByRoute(request, env, route.routeId);
       case "album":
-        return handleAlbum(request, env, route.albumId);
+        return await handleAlbum(request, env, route.albumId);
       case "album-fields":
-        return handleAlbumFields(request, env, route.albumId);
+        return await handleAlbumFields(request, env, route.albumId);
       case "album-images":
-        return handleAlbumImages(request, env, route.albumId);
+        return await handleAlbumImages(request, env, route.albumId);
       case "album-images-check":
         return request.method === "POST"
-          ? checkAlbumImages(request, env, route.albumId)
+          ? await checkAlbumImages(request, env, route.albumId)
           : methodNotAllowed(["POST"]);
       case "image":
-        return handleImage(request, env, route.imageId);
+        return await handleImage(request, env, route.imageId);
       case "image-asset":
         return request.method === "GET"
-          ? getImageAsset(request, env, route.imageId)
+          ? await getImageAsset(request, env, route.imageId)
           : methodNotAllowed(["GET"]);
     }
   } catch (error) {
@@ -102,6 +107,13 @@ function matchApiRoute(pathname: string): ApiRoute | null {
   }
   if (parts.length === 2 && parts[1] === "albums") {
     return { kind: "albums" };
+  }
+  if (
+    parts.length === 4 &&
+    parts[1] === "albums" &&
+    parts[2] === "by-route"
+  ) {
+    return { kind: "album-by-route", routeId: parts[3] };
   }
   if (parts.length === 3 && parts[1] === "albums") {
     return { kind: "album", albumId: parts[2] };
@@ -183,6 +195,7 @@ async function handleAlbums(request: Request, env: CloudflareEnv): Promise<Respo
     const now = new Date().toISOString();
     const album = await createAlbum(env.DB, {
       id: crypto.randomUUID(),
+      routeId: createAlbumRouteId(),
       title: input.title,
       description: input.description,
       albumType: input.albumType,
@@ -192,6 +205,29 @@ async function handleAlbums(request: Request, env: CloudflareEnv): Promise<Respo
     return dataResponse(album, 201);
   }
   return methodNotAllowed(["GET", "POST"]);
+}
+
+async function handleAlbumByRoute(
+  request: Request,
+  env: CloudflareEnv,
+  routeId: string
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return methodNotAllowed(["GET"]);
+  }
+
+  const { albumRouteIdSchema } = await import("@/lib/validation/schemas");
+  const parsedRouteId = albumRouteIdSchema.safeParse(routeId);
+  if (!parsedRouteId.success) {
+    throw new HttpError(404, "相册不存在", "album_not_found");
+  }
+
+  const album = await getAlbumByRouteId(env.DB, parsedRouteId.data);
+  if (!album) {
+    throw new HttpError(404, "相册不存在", "album_not_found");
+  }
+  await requireAlbumReadAccess(request, env, album);
+  return dataResponse(album);
 }
 
 async function handleAlbumFields(
@@ -239,14 +275,38 @@ async function handleAlbum(
     await requireAdmin(request, env);
     const { albumUpdateSchema } = await import("@/lib/validation/schemas");
     const input = albumUpdateSchema.parse(await request.json());
-    await requireExistingAlbum(env, albumId);
-    const album = await updateAlbum(env.DB, albumId, {
-      title: input.title,
-      description: input.description,
-      isPublic: input.isPublic,
-      coverImageId: input.coverImageId,
-      now: new Date().toISOString()
-    });
+    const currentAlbum = await requireExistingAlbum(env, albumId);
+    if (input.routeId && input.routeId !== currentAlbum.route_id) {
+      const conflictingAlbum = await getAlbumByRouteId(env.DB, input.routeId);
+      if (conflictingAlbum && conflictingAlbum.id !== albumId) {
+        throw new HttpError(
+          409,
+          "该路由 ID 已被其他相册或设定集使用",
+          "route_id_conflict"
+        );
+      }
+    }
+
+    let album;
+    try {
+      album = await updateAlbum(env.DB, albumId, {
+        title: input.title,
+        description: input.description,
+        routeId: input.routeId,
+        isPublic: input.isPublic,
+        coverImageId: input.coverImageId,
+        now: new Date().toISOString()
+      });
+    } catch (error) {
+      if (isAlbumRouteIdUniqueConstraint(error)) {
+        throw new HttpError(
+          409,
+          "该路由 ID 已被其他相册或设定集使用",
+          "route_id_conflict"
+        );
+      }
+      throw error;
+    }
     if (!album) {
       throw new HttpError(404, "相册不存在", "album_not_found");
     }
@@ -521,6 +581,11 @@ function isZodError(error: unknown): error is { name: "ZodError"; issues: unknow
       "issues" in error &&
       Array.isArray(error.issues)
   );
+}
+
+function isAlbumRouteIdUniqueConstraint(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /UNIQUE constraint failed:\s*albums\.route_id|idx_albums_route_id/i.test(message);
 }
 
 function noStore(response: Response): Response {

@@ -2,6 +2,7 @@ export type AlbumType = "album" | "setting";
 
 export type Album = {
   id: string;
+  route_id: string;
   title: string;
   description: string;
   album_type: AlbumType;
@@ -45,6 +46,7 @@ export type StoredImage = ImageSummary & {
 
 type AlbumListRow = {
   id: string;
+  route_id: string;
   title: string;
   description: string;
   album_type: string | null;
@@ -112,6 +114,7 @@ export async function createAlbum(
   db: D1Database,
   input: {
     id: string;
+    routeId: string;
     title: string;
     description: string;
     albumType: AlbumType;
@@ -123,13 +126,14 @@ export async function createAlbum(
     db.prepare(
       `
       INSERT INTO albums (
-        id, title, description, album_type, is_public, access_key, created_at, updated_at
+        id, route_id, title, description, album_type, is_public, access_key, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .bind(
       input.id,
+      input.routeId,
       input.title,
       input.description,
       input.albumType,
@@ -233,6 +237,21 @@ export async function replaceAlbumFields(
 }
 
 export async function getAlbum(db: D1Database, albumId: string): Promise<Album | null> {
+  return getAlbumByColumn(db, "id", albumId);
+}
+
+export async function getAlbumByRouteId(
+  db: D1Database,
+  routeId: string
+): Promise<Album | null> {
+  return getAlbumByColumn(db, "route_id", routeId);
+}
+
+async function getAlbumByColumn(
+  db: D1Database,
+  column: "id" | "route_id",
+  value: string
+): Promise<Album | null> {
   const row = await db
     .prepare(
       `
@@ -260,10 +279,10 @@ export async function getAlbum(db: D1Database, albumId: string): Promise<Album |
         GROUP BY album_id
       ) stats ON stats.album_id = a.id
       LEFT JOIN images cover ON cover.id = a.cover_image_id
-      WHERE a.id = ?
+      WHERE a.${column} = ?
       `
     )
-    .bind(albumId)
+    .bind(value)
     .first<AlbumListRow>();
 
   return row ? toAlbum(row) : null;
@@ -275,6 +294,7 @@ export async function updateAlbum(
   input: {
     title?: string;
     description?: string;
+    routeId?: string;
     isPublic?: boolean;
     coverImageId?: string | null;
     now: string;
@@ -289,13 +309,14 @@ export async function updateAlbum(
     .prepare(
       `
       UPDATE albums
-      SET title = ?, description = ?, is_public = ?, cover_image_id = ?, updated_at = ?
+      SET title = ?, description = ?, route_id = ?, is_public = ?, cover_image_id = ?, updated_at = ?
       WHERE id = ?
       `
     )
     .bind(
       input.title ?? current.title,
       input.description ?? current.description,
+      input.routeId ?? current.route_id,
       (input.isPublic ?? current.is_public) ? 1 : 0,
       input.coverImageId === undefined ? current.cover_image_id : input.coverImageId,
       input.now,
@@ -519,6 +540,7 @@ export async function deleteImage(db: D1Database, imageId: string): Promise<void
 function toAlbum(row: AlbumListRow): Album {
   return {
     id: row.id,
+    route_id: row.route_id,
     title: row.title,
     description: row.description,
     album_type: row.album_type === "setting" ? "setting" : "album",

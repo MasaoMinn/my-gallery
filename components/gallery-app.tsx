@@ -21,6 +21,7 @@ import {
   Globe2,
   ImageIcon,
   LoaderCircle,
+  Link2,
   LogIn,
   LogOut,
   Lock,
@@ -53,7 +54,7 @@ const IMAGE_SIZE_OPTIONS: Array<{ value: ImageSize; label: string; columns: numb
 
 type AlbumTypeFilter = "all" | AlbumType;
 
-export function GalleryApp() {
+export function GalleryApp({ initialRouteId }: { initialRouteId?: string }) {
   const router = useRouter();
   const { authenticated, loading: loadingAdmin, logout } = useAdminSession();
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -66,6 +67,7 @@ export function GalleryApp() {
   const [albumEdit, setAlbumEdit] = useState({
     title: "",
     description: "",
+    routeId: "",
     isPublic: true
   });
   const [albumCreate, setAlbumCreate] = useState({
@@ -83,6 +85,7 @@ export function GalleryApp() {
   const [imageCacheVersion, setImageCacheVersion] = useState(0);
   const [loadingAlbums, setLoadingAlbums] = useState(true);
   const [loadingImages, setLoadingImages] = useState(false);
+  const [routeUnavailable, setRouteUnavailable] = useState(false);
   const [mutating, setMutating] = useState(false);
   const refreshMenuRef = useRef<HTMLDetailsElement>(null);
 
@@ -122,20 +125,51 @@ export function GalleryApp() {
 
     async function loadInitialAlbums() {
       try {
-        const loadedAlbums = await apiJson<Album[]>("/api/albums");
+        const albumListPromise = apiJson<Album[]>("/api/albums");
+        const routedAlbumPromise = initialRouteId
+          ? apiJson<Album>(`/api/albums/by-route/${encodeURIComponent(initialRouteId)}`)
+          : Promise.resolve(null);
+        const [loadedAlbums, routedAlbum] = await Promise.all([
+          albumListPromise,
+          routedAlbumPromise
+        ]);
         if (cancelled) {
           return;
         }
 
-        setAlbums(loadedAlbums);
-        setSelectedAlbumId("");
-        setSelectedImageId("");
-        setImages([]);
+        const initialAlbums = routedAlbum
+          ? [routedAlbum, ...loadedAlbums.filter((album) => album.id !== routedAlbum.id)]
+          : loadedAlbums;
+        setAlbums(initialAlbums);
+        setRouteUnavailable(false);
+        if (routedAlbum) {
+          applyAlbumSelection(routedAlbum);
+          setLoadingImages(true);
+          const loadedImages = await apiJson<GalleryImage[]>(
+            `/api/albums/${routedAlbum.id}/images`
+          );
+          if (!cancelled) {
+            setImages(loadedImages);
+            applyImageSelection(null);
+          }
+        } else {
+          setSelectedAlbumId("");
+          setSelectedImageId("");
+          setImages([]);
+        }
       } catch (error) {
-        showError(error);
+        if (initialRouteId && error instanceof ApiError && error.status === 404) {
+          setAlbums([]);
+          setSelectedAlbumId("");
+          setImages([]);
+          setRouteUnavailable(true);
+        } else {
+          showError(error);
+        }
       } finally {
         if (!cancelled) {
           setLoadingAlbums(false);
+          setLoadingImages(false);
         }
       }
     }
@@ -145,7 +179,7 @@ export function GalleryApp() {
     return () => {
       cancelled = true;
     };
-  }, [authenticated, loadingAdmin]);
+  }, [authenticated, initialRouteId, loadingAdmin]);
 
   async function refreshAlbums(preferredAlbumId = selectedAlbumId) {
     setLoadingAlbums(true);
@@ -160,7 +194,7 @@ export function GalleryApp() {
       } else {
         setSelectedAlbumId("");
         setSelectedImageId("");
-        setAlbumEdit({ title: "", description: "", isPublic: true });
+        setAlbumEdit({ title: "", description: "", routeId: "", isPublic: true });
         setImageEdit({ description: "" });
         setImages([]);
       }
@@ -196,18 +230,17 @@ export function GalleryApp() {
   }
 
   function selectAlbum(album: Album) {
-    applyAlbumSelection(album);
-    setImages([]);
-    applyImageSelection(null);
-    void refreshImages(album.id);
+    router.push(`/${encodeURIComponent(album.route_id)}`);
   }
 
   function returnToAlbums() {
     setSelectedAlbumId("");
     setImages([]);
     setAlbumEditOpen(false);
-    setAlbumEdit({ title: "", description: "", isPublic: true });
+    setAlbumEdit({ title: "", description: "", routeId: "", isPublic: true });
     applyImageSelection(null);
+    setRouteUnavailable(false);
+    router.push("/");
   }
 
   function applyAlbumSelection(album: Album) {
@@ -215,6 +248,7 @@ export function GalleryApp() {
     setAlbumEdit({
       title: album.title,
       description: album.description,
+      routeId: album.route_id,
       isPublic: album.is_public
     });
   }
@@ -256,6 +290,7 @@ export function GalleryApp() {
       setImages([]);
       closeAlbumCreate();
       toast.success(`${albumTypeLabel(album.album_type)}「${album.title}」已创建`);
+      router.push(`/${encodeURIComponent(album.route_id)}`);
     });
   }
 
@@ -268,6 +303,7 @@ export function GalleryApp() {
       const payload = {
         title: albumEdit.title,
         description: albumEdit.description,
+        routeId: albumEdit.routeId,
         isPublic: albumEdit.isPublic
       };
 
@@ -280,6 +316,9 @@ export function GalleryApp() {
       setAlbums((current) => current.map((item) => (item.id === album.id ? album : item)));
       applyAlbumSelection(album);
       setAlbumEditOpen(false);
+      if (album.route_id !== selectedAlbum.route_id) {
+        router.replace(`/${encodeURIComponent(album.route_id)}`);
+      }
       toast.success("相册信息已保存");
     });
   }
@@ -302,7 +341,7 @@ export function GalleryApp() {
       } else {
         setSelectedAlbumId("");
         setSelectedImageId("");
-        setAlbumEdit({ title: "", description: "", isPublic: true });
+        setAlbumEdit({ title: "", description: "", routeId: "", isPublic: true });
         setImageEdit({ description: "" });
         setImages([]);
       }
@@ -366,6 +405,45 @@ export function GalleryApp() {
     await logout();
     returnToAlbums();
     toast.success("已退出管理员会话");
+  }
+
+  async function copyAlbumLink() {
+    if (!selectedAlbum) {
+      return;
+    }
+
+    const directUrl = new URL(
+      `/${encodeURIComponent(selectedAlbum.route_id)}`,
+      window.location.origin
+    ).toString();
+    try {
+      await navigator.clipboard.writeText(directUrl);
+      toast.success("直达链接已复制");
+    } catch {
+      toast.error("无法复制链接，请从地址栏复制", { duration: 6_000 });
+    }
+  }
+
+  if (routeUnavailable) {
+    return (
+      <main className="route-not-found-page">
+        <section aria-labelledby="route-not-found-title" className="route-not-found-card">
+          <div className="brand route-not-found-brand">
+            <div className="brand-mark cloudflare-brand-mark">
+              <Cloud aria-hidden="true" size={23} strokeWidth={2.2} />
+            </div>
+            <strong>Cloudflare Album</strong>
+          </div>
+          <p className="route-not-found-code">404</p>
+          <h1 id="route-not-found-title">相册不存在或不可访问</h1>
+          <p>请检查链接是否正确。非公开相册和设定集仅管理员登录后可以访问。</p>
+          <Link className="primary-button route-not-found-back" href="/">
+            <ArrowLeft aria-hidden="true" size={17} />
+            返回相册首页
+          </Link>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -440,12 +518,22 @@ export function GalleryApp() {
                 </div>
                 <div className="album-title-row">
                   <h2>{selectedAlbum.title}</h2>
+                  {selectedAlbum.is_public ? (
+                    <button
+                      className="secondary-button album-copy-button"
+                      onClick={() => void copyAlbumLink()}
+                      type="button"
+                    >
+                      <Link2 aria-hidden="true" size={16} />
+                      复制相册链接
+                    </button>
+                  ) : null}
                   {authenticated ? (
                     <button
-                      aria-label="编辑标题与描述"
+                      aria-label="编辑相册信息"
                       className="icon-button album-edit-button"
                       onClick={() => setAlbumEditOpen(true)}
-                      title="编辑标题与描述"
+                      title="编辑相册信息"
                       type="button"
                     >
                       <Pencil aria-hidden="true" size={17} />
@@ -776,7 +864,7 @@ export function GalleryApp() {
             <div className="dialog-heading">
               <div className="panel-heading">
                 <p className="section-label">{albumTypeLabel(selectedAlbum.album_type)}</p>
-                <h2 id="album-edit-title">编辑标题与描述</h2>
+                <h2 id="album-edit-title">编辑相册信息</h2>
               </div>
               <button aria-label="关闭相册编辑" className="icon-button" onClick={closeAlbumEdit} type="button">
                 <X aria-hidden="true" size={19} />
@@ -799,6 +887,27 @@ export function GalleryApp() {
               rows={5}
               value={albumEdit.description}
             />
+          </label>
+          <label>
+            路由 ID
+            <input
+              autoCapitalize="none"
+              autoCorrect="off"
+              maxLength={64}
+              onChange={(event) =>
+                setAlbumEdit((current) => ({
+                  ...current,
+                  routeId: event.target.value.toLowerCase()
+                }))
+              }
+              pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+              required
+              spellCheck={false}
+              value={albumEdit.routeId}
+            />
+            <small className="field-hint">
+              公开地址：gallery.tangetsu.top/{albumEdit.routeId || "..."}，只能使用小写字母、数字和连字符。
+            </small>
           </label>
           <label className="check-row">
             <input

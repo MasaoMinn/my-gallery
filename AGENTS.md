@@ -55,6 +55,7 @@ Use a simple relational model unless product requirements change.
 Suggested fields:
 
 - `id`: stable unique identifier.
+- `route_id`: editable, URL-safe unique identifier used by `gallery.tangetsu.top/{route_id}`.
 - `title`: album title.
 - `description`: album description text.
 - `album_type`: `album` for a regular album or `setting` for a setting collection.
@@ -130,6 +131,7 @@ Do not assume Next.js default image optimization works unchanged on Cloudflare W
 - Updating descriptions should be independent from replacing image files.
 - Image descriptions should appear on the gallery grid as semi-transparent hover overlays. Clicking opens a read-only large preview; authenticated administrators can explicitly enter edit mode below it.
 - Album and image list APIs should support stable ordering.
+- Every album and setting collection must have an editable unique direct route at `/{route_id}` without weakening private-album access control. Reject reserved application routes and conflicting ids on the server.
 
 ## Security And Validation
 

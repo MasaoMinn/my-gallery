@@ -10,6 +10,7 @@ function album(
 ): Album {
   return {
     id,
+    route_id: id.padEnd(32, "0"),
     title,
     description: "",
     album_type: "album",

@@ -138,8 +138,11 @@ export function CreateAlbumManager() {
             <h2>{createdAlbum ? `打开「${createdAlbum.title}」后上传` : "先创建内容"}</h2>
             <span>上传入口会出现在内容详情页顶部，仅在选中后可用。</span>
           </div>
-          <Link className="primary-button" href="/">
-            返回首页
+          <Link
+            className="primary-button"
+            href={createdAlbum ? `/${encodeURIComponent(createdAlbum.route_id)}` : "/"}
+          >
+            {createdAlbum ? "打开新建内容" : "返回首页"}
           </Link>
         </div>
       </section>

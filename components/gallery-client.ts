@@ -26,7 +26,17 @@ export async function apiJson<T>(input: RequestInfo | URL, init?: RequestInit): 
     return undefined as T;
   }
 
-  const payload = (await response.json()) as ApiEnvelope<T>;
+  const responseText = await response.text();
+  let payload: ApiEnvelope<T> = {};
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText) as ApiEnvelope<T>;
+    } catch {
+      if (response.ok) {
+        throw new ApiError("服务器返回了无法解析的数据", response.status, "invalid_response");
+      }
+    }
+  }
   if (!response.ok) {
     throw new ApiError(
       payload.error?.message ?? `请求失败: ${response.status}`,

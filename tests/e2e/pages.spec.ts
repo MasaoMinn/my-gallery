@@ -1,7 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { Album } from "@/lib/db/gallery";
 
-const album = {
+const album: Album = {
   id: "album-1",
+  route_id: "0123456789abcdef0123456789abcdef",
   title: "测试相册",
   description: "相册描述",
   album_type: "album" as const,
@@ -36,11 +38,18 @@ async function mockSession(page: Page, authenticated: boolean) {
 
 async function mockGallery(page: Page) {
   await page.route("**/api/albums", (route) => route.fulfill({ json: { data: [album] } }));
+  await mockDirectAlbum(page, album);
   await page.route("**/api/albums/album-1/images", (route) =>
     route.fulfill({ json: { data: [image] } })
   );
   await page.route("**/api/images/image-1/asset", (route) =>
     route.fulfill({ body: Buffer.from("image"), contentType: "image/jpeg" })
+  );
+}
+
+async function mockDirectAlbum(page: Page, routedAlbum = album) {
+  await page.route("**/api/albums/by-route/*", (route) =>
+    route.fulfill({ json: { data: routedAlbum } })
   );
 }
 
@@ -55,7 +64,8 @@ test("visitors can browse public image details but cannot see management control
   await expect(page.getByLabel("相册排序字段")).toHaveValue("updatedAt");
 
   await page.getByRole("button", { name: /测试相册/ }).click();
-  await expect(page.getByRole("button", { name: "编辑标题与描述" })).toHaveCount(0);
+  await expect(page).toHaveURL(`/${album.route_id}`);
+  await expect(page.getByRole("button", { name: "编辑相册信息" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "上传图片" })).toHaveCount(0);
   await expect(page.locator("aside")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "中，桌面端一行 5 张图" })).toHaveAttribute("aria-pressed", "true");
@@ -74,6 +84,62 @@ test("visitors can browse public image details but cannot see management control
   await expect(dialog).not.toContainText("hidden.jpg");
 });
 
+test("public albums can be opened directly by their unique route id", async ({ page }) => {
+  await mockSession(page, false);
+  await mockGallery(page);
+
+  await page.goto(`/${album.route_id}`);
+
+  await expect(page.getByRole("heading", { name: album.title })).toBeVisible();
+  await expect(page.getByRole("button", { name: "复制相册链接" })).toBeVisible();
+  await expect(page.locator(".image-card")).toHaveCount(1);
+  await page.getByRole("button", { name: "返回首页" }).click();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("unknown or inaccessible route ids do not expose an album", async ({ page }) => {
+  await mockSession(page, false);
+  await page.route("**/api/albums", (route) =>
+    route.fulfill({ json: { data: [] } })
+  );
+  await page.route("**/api/albums/by-route/*", (route) =>
+    route.fulfill({
+      json: { error: { code: "album_not_found", message: "相册不存在" } },
+      status: 404
+    })
+  );
+
+  await page.goto("/ffffffffffffffffffffffffffffffff");
+
+  await expect(page.getByText("404", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "相册不存在或不可访问" })).toBeVisible();
+  await expect(page.getByLabel("图片浏览区")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /测试相册/ })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "返回相册首页" })).toBeVisible();
+});
+
+test("private albums do not expose the copy-link action", async ({ page }) => {
+  const privateAlbum: Album = {
+    ...album,
+    route_id: "abcdef0123456789abcdef0123456789",
+    title: "非公开相册",
+    is_public: false
+  };
+  await mockSession(page, true);
+  await page.route("**/api/albums", (route) =>
+    route.fulfill({ json: { data: [privateAlbum] } })
+  );
+  await mockDirectAlbum(page, privateAlbum);
+  await page.route("**/api/albums/album-1/images", (route) =>
+    route.fulfill({ json: { data: [] } })
+  );
+
+  await page.goto(`/${privateAlbum.route_id}`);
+
+  await expect(page.getByRole("heading", { name: privateAlbum.title })).toBeVisible();
+  await expect(page.getByRole("button", { name: "复制相册链接" })).toHaveCount(0);
+});
+
 test("wide images span two columns without refetching image assets when the size changes", async ({ page }, testInfo) => {
   const mixedImages = [
     { ...image, id: "wide-image", width: 1800, height: 900, description: "宽图" },
@@ -84,6 +150,7 @@ test("wide images span two columns without refetching image assets when the size
   let imageListRequests = 0;
 
   await mockSession(page, false);
+  await mockDirectAlbum(page, album);
   await page.route("**/api/albums", (route) => route.fulfill({ json: { data: [album] } }));
   await page.route("**/api/albums/album-1/images", (route) => {
     imageListRequests += 1;
@@ -131,6 +198,7 @@ test("refresh dropdown can invalidate image URLs and reload the current album", 
   const assetUrls: string[] = [];
 
   await mockSession(page, false);
+  await mockDirectAlbum(page, album);
   await page.route("**/api/albums", (route) => {
     albumRequests += 1;
     return route.fulfill({ json: { data: [album] } });
@@ -176,9 +244,35 @@ test("refresh dropdown can invalidate image URLs and reload the current album", 
 test("administrators edit albums and explicitly enter image description edit mode", async ({ page }) => {
   await mockSession(page, true);
   await mockGallery(page);
+  let currentAlbum = album;
+  await page.route("**/api/albums/by-route/*", (route) =>
+    route.fulfill({ json: { data: currentAlbum } })
+  );
   await page.route("**/api/albums/album-1", async (route) => {
-    const input = route.request().postDataJSON() as { title: string; description: string };
-    await route.fulfill({ json: { data: { ...album, ...input } } });
+    const input = route.request().postDataJSON() as {
+      title: string;
+      description: string;
+      routeId: string;
+    };
+    if (input.routeId === "duplicate-album") {
+      await route.fulfill({
+        status: 409,
+        json: {
+          error: {
+            code: "route_id_conflict",
+            message: "该路由 ID 已被其他相册或设定集使用"
+          }
+        }
+      });
+      return;
+    }
+    currentAlbum = {
+      ...currentAlbum,
+      title: input.title,
+      description: input.description,
+      route_id: input.routeId
+    };
+    await route.fulfill({ json: { data: currentAlbum } });
   });
   await page.route("**/api/images/image-1", async (route) => {
     const input = route.request().postDataJSON() as { description: string };
@@ -189,14 +283,20 @@ test("administrators edit albums and explicitly enter image description edit mod
   await expect(page.getByRole("button", { name: "新建内容" })).toBeVisible();
   await page.getByRole("button", { name: /测试相册/ }).click();
 
-  const editAlbumButton = page.getByRole("button", { name: "编辑标题与描述" });
+  const editAlbumButton = page.getByRole("button", { name: "编辑相册信息" });
   await expect(editAlbumButton).toBeVisible();
   await expect(editAlbumButton).toHaveText("");
-  await expect(editAlbumButton).toHaveAttribute("title", "编辑标题与描述");
+  await expect(editAlbumButton).toHaveAttribute("title", "编辑相册信息");
   await editAlbumButton.click();
-  const albumDialog = page.getByRole("dialog", { name: "编辑标题与描述" });
+  const albumDialog = page.getByRole("dialog", { name: "编辑相册信息" });
   await albumDialog.getByLabel("名称").fill("更新后的相册");
+  await albumDialog.getByLabel("路由 ID").fill("duplicate-album");
   await albumDialog.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText("该路由 ID 已被其他相册或设定集使用")).toBeVisible();
+  await expect(albumDialog).toBeVisible();
+  await albumDialog.getByLabel("路由 ID").fill("updated-album");
+  await albumDialog.getByRole("button", { name: "保存" }).click();
+  await expect(page).toHaveURL("/updated-album");
   await expect(page.getByRole("heading", { name: "更新后的相册" })).toBeVisible();
 
   await page.locator(".image-card").click();
@@ -354,6 +454,7 @@ test("administrators choose a setting collection type and enter it immediately",
   const createdAlbum = {
     ...album,
     id: "setting-2",
+    route_id: "1123456789abcdef0123456789abcdef",
     title: "新建的设定集",
     description: "设定集描述",
     album_type: "setting" as const,
@@ -371,6 +472,7 @@ test("administrators choose a setting collection type and enter it immediately",
   await page.route("**/api/albums/setting-2/images", (route) =>
     route.fulfill({ json: { data: [] } })
   );
+  await mockDirectAlbum(page, createdAlbum);
   await page.route("**/api/albums/setting-2/fields", (route) =>
     route.fulfill({ json: { data: [] } })
   );
@@ -385,16 +487,17 @@ test("administrators choose a setting collection type and enter it immediately",
 
   await expect(dialog).toBeHidden();
   expect(requestedType).toBe("setting");
+  await expect(page).toHaveURL(`/${createdAlbum.route_id}`);
   await expect(page.getByRole("heading", { name: "新建的设定集" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "基础信息" })).toBeVisible();
   await expect(page.locator("header").getByRole("link", { name: "上传图片" })).toBeVisible();
-  await expect(page).toHaveURL(/\/$/);
 });
 
 test("homepage filters setting collections and visitors see read-only base information", async ({ page }) => {
   const settingAlbum = {
     ...album,
     id: "setting-1",
+    route_id: "2123456789abcdef0123456789abcdef",
     title: "星野 澪",
     description: "雪豹设定",
     album_type: "setting" as const,
@@ -409,6 +512,7 @@ test("homepage filters setting collections and visitors see read-only base infor
   await page.route("**/api/albums", (route) =>
     route.fulfill({ json: { data: [album, settingAlbum] } })
   );
+  await mockDirectAlbum(page, settingAlbum);
   await page.route("**/api/albums/setting-1/images", (route) =>
     route.fulfill({ json: { data: [] } })
   );
@@ -430,6 +534,7 @@ test("administrators add, edit, and delete setting collection fields", async ({ 
   const settingAlbum = {
     ...album,
     id: "setting-1",
+    route_id: "3123456789abcdef0123456789abcdef",
     title: "星野 澪",
     album_type: "setting" as const,
     image_count: 0
@@ -444,6 +549,7 @@ test("administrators add, edit, and delete setting collection fields", async ({ 
   await page.route("**/api/albums", (route) =>
     route.fulfill({ json: { data: [settingAlbum] } })
   );
+  await mockDirectAlbum(page, settingAlbum);
   await page.route("**/api/albums/setting-1/images", (route) =>
     route.fulfill({ json: { data: [] } })
   );
